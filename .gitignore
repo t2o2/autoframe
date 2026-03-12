@@ -1,0 +1,10 @@
+# Agent credentials — never commit
+.auto-claude/.env
+
+# Session logs (large, local-only)
+scripts/autonomous-agent-logs/
+scripts/autonomous-review-logs/
+scripts/autonomous-approve-logs/
+
+# macOS
+.DS_Store
