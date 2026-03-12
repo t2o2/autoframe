@@ -35,9 +35,10 @@ The following workflow states must exist in your Linear team. Create them under 
 
 ## Quick Start
 
+Run this from inside your existing repo:
+
 ```bash
-git clone <repo> && cd autonomous-agents
-./setup.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/t2o2/autoframe/master/setup.sh)
 ```
 
 The setup script writes your Linear API key and team key to `.auto-claude/.env`, then optionally copies the scripts and Claude commands into an existing project.
