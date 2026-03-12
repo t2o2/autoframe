@@ -31,7 +31,7 @@ fi
 if [[ -z "${LINEAR_TEAM_KEY:-}" && -f "$REPO_ROOT/.auto-claude/.env" ]]; then
     LINEAR_TEAM_KEY="$(grep -E '^LINEAR_TEAM_KEY=' "$REPO_ROOT/.auto-claude/.env" | cut -d= -f2 | cut -d' ' -f1)"
 fi
-LINEAR_TEAM_KEY="${LINEAR_TEAM_KEY:-GYL}"  # fallback default
+LINEAR_TEAM_KEY="${LINEAR_TEAM_KEY:-ENG}"  # fallback default
 
 POLL_INTERVAL=60
 HEARTBEAT_INTERVAL=30
