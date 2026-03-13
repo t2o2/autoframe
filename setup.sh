@@ -2,8 +2,9 @@
 # setup.sh — configure the autonomous agents for your project
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.auto-claude/.env"
+TMP_DIR="$(mktemp -d)"
+ENV_FILE="$TMP_DIR/.env"
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 
@@ -53,8 +54,6 @@ echo ""
 echo -e "${BOLD}Configuration${RESET}"
 echo ""
 
-mkdir -p "$SCRIPT_DIR/.auto-claude"
-
 # Linear team key
 echo -n "Enter your Linear team key (e.g. ENG, ACME): "
 read -r TEAM_KEY
@@ -73,17 +72,31 @@ EOF
 
 ok "Wrote config to .auto-claude/.env"
 
-# ── Copy scripts to target repo ───────────────────────────────────────────────
+# ── Download scripts to target repo ───────────────────────────────────────────
+
+REPO_RAW="https://raw.githubusercontent.com/t2o2/autoframe/master"
+
+SCRIPTS=(
+    "scripts/autonomous-agent.sh"
+    "scripts/autonomous-approve-agent.sh"
+    "scripts/autonomous-review-agent.sh"
+)
+
+COMMANDS=(
+    ".claude/commands/ticket-approve.md"
+    ".claude/commands/ticket-process.md"
+    ".claude/commands/ticket-review.md"
+)
 
 echo ""
-echo -e "${BOLD}Copy scripts${RESET}"
+echo -e "${BOLD}Install scripts${RESET}"
 echo ""
 echo -e "  Default destination: ${CYAN}$(pwd)${RESET}"
 echo -n "  Press Enter to confirm, type a different path, or 'n' to skip: "
 read -r TARGET_REPO_INPUT
 
 if [[ "$TARGET_REPO_INPUT" == "n" || "$TARGET_REPO_INPUT" == "N" ]]; then
-    info "Skipping script copy."
+    info "Skipping script install."
     TARGET_REPO=""
 elif [[ -n "$TARGET_REPO_INPUT" ]]; then
     TARGET_REPO="${TARGET_REPO_INPUT/#\~/$HOME}"
@@ -98,11 +111,16 @@ if [[ -n "$TARGET_REPO" ]]; then
         mkdir -p "$TARGET_REPO/scripts"
         mkdir -p "$TARGET_REPO/.claude/commands"
 
-        cp "$SCRIPT_DIR/scripts/"*.sh "$TARGET_REPO/scripts/"
-        chmod +x "$TARGET_REPO/scripts/"*.sh
-        cp "$SCRIPT_DIR/.claude/commands/"*.md "$TARGET_REPO/.claude/commands/"
+        for file in "${SCRIPTS[@]}"; do
+            curl -fsSL "$REPO_RAW/$file" -o "$TARGET_REPO/$file"
+            chmod +x "$TARGET_REPO/$file"
+        done
 
-        # Copy .env config if .auto-claude doesn't exist yet
+        for file in "${COMMANDS[@]}"; do
+            curl -fsSL "$REPO_RAW/$file" -o "$TARGET_REPO/$file"
+        done
+
+        # Write .env config if .auto-claude doesn't exist yet
         if [[ ! -f "$TARGET_REPO/.auto-claude/.env" ]]; then
             mkdir -p "$TARGET_REPO/.auto-claude"
             cp "$ENV_FILE" "$TARGET_REPO/.auto-claude/.env"
@@ -111,7 +129,7 @@ if [[ -n "$TARGET_REPO" ]]; then
             info "Skipped .auto-claude/.env (already exists)"
         fi
 
-        ok "Copied scripts and commands to: $TARGET_REPO"
+        ok "Downloaded scripts and commands to: $TARGET_REPO"
     fi
 fi
 
