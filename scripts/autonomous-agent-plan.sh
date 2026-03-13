@@ -435,10 +435,10 @@ stop_stale_watchdog() {
 
 start_status_watcher() {
     local ticket_id="$1"
-    local working_state="$2"  # ticket status while claude is working
-    local pipe_pid="$3"
-    local lock_dir="$4"
-    local hb_file="$5"
+    local pipe_pid="$2"
+    local lock_dir="$3"
+    local hb_file="$4"
+    local allowed_states_str="$5"  # colon-separated, e.g. "Todo:Research"
     (
         while kill -0 "$pipe_pid" 2>/dev/null; do
             sleep 30
@@ -446,7 +446,12 @@ start_status_watcher() {
             local state
             state=$(get_ticket_state "$ticket_id" 2>/dev/null) || continue
             [[ -z "$state" ]] && continue
-            if [[ "$state" != "$working_state" ]]; then
+            local allowed=false
+            local s
+            while IFS= read -r s; do
+                [[ "$state" == "$s" ]] && allowed=true && break
+            done < <(tr ':' '\n' <<< "$allowed_states_str")
+            if ! $allowed; then
                 log INFO "  $ticket_id advanced to '$state' — work complete, terminating pipeline"
                 kill -- "-$(ps -o pgid= -p "$pipe_pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
                     || kill "$pipe_pid" 2>/dev/null || true
@@ -527,7 +532,7 @@ process_ticket() {
     PIPELINE_PID=$!
 
     start_stale_watchdog "$ticket_id" "$HB_FILE" "Research Approved" "$PIPELINE_PID"
-    start_status_watcher "$ticket_id" "Planning" "$PIPELINE_PID" "$lock_dir" "$HB_FILE"
+    start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" "Planning"
 
     wait "$PIPELINE_PID"
     exit_code=$?
