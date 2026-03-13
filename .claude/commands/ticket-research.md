@@ -59,16 +59,23 @@ This analysis drives which sub-agents to spawn in Phase 3.
 
 Spawn multiple `Explore` agents in parallel — each focused on a specific research area. Adapt agents to the ticket; these are representative examples:
 
-- **Scope agent** — "Find all files that implement or reference [feature area]. List file paths, function names, and a one-sentence description of what each does. No suggestions — document what exists."
-- **Pattern agent** — "Find existing patterns in the codebase similar to [what this ticket requires]. Return file:line references and describe each pattern."
-- **Test agent** — "Find existing tests for [the affected component]. Return file paths, what behaviors they cover, and the test helpers available."
-- **Schema / types agent** — "Find database schema, Rust types, or TypeScript types related to [the area]. Return file:line references."
+Each sub-agent prompt must lead with its prohibition contract before its task:
 
-Rules for all sub-agents:
+- **SCOPE AGENT**
+  `MUST NOT: Suggest improvements. Critique code quality. Speculate about what should change. Recommend refactors.`
+  `ONLY DO: Find all files that implement or reference [feature area]. List file paths, function names, and a one-sentence description of what each does. If nothing found, say so explicitly. Return concrete file:line references only.`
 
-- Document what IS — never suggest improvements or changes
-- Return concrete file:line references for every finding
-- If nothing relevant is found, say so explicitly
+- **PATTERN AGENT**
+  `MUST NOT: Critique existing patterns. Suggest better approaches. Recommend changes.`
+  `ONLY DO: Find existing patterns in the codebase similar to [what this ticket requires]. Show me examples to follow, not critiques to fix. Return file:line references and describe what each pattern does — nothing more.`
+
+- **TEST AGENT**
+  `MUST NOT: Assess test quality. Suggest missing tests. Recommend improvements.`
+  `ONLY DO: Find existing tests for [the affected component]. Return file paths, what behaviors each test covers, and the test setup helpers available. Document what exists — not what should exist.`
+
+- **SCHEMA / TYPES AGENT**
+  `MUST NOT: Suggest schema changes. Flag normalization issues. Recommend type improvements.`
+  `ONLY DO: Find database schema definitions, Rust structs/enums, or TypeScript interfaces related to [the area]. Return file:line references and the exact type definitions. No commentary.`
 
 Wait for **ALL** sub-agents to complete before proceeding to Phase 4.
 
@@ -130,6 +137,39 @@ Compile all sub-agent findings into a structured research document. Be factual a
 3. Post a final summary comment:
    > "Research complete. Findings posted above. **Next step:** review the research and move ticket to **Research Approved** to trigger the planning agent."
 
+4. Write research artifact to the persistent thought store:
+
+   ```bash
+   mkdir -p "thoughts/tickets/{{ARGUMENTS}}"
+   ```
+
+   Write to `thoughts/tickets/{{ARGUMENTS}}/research.md`:
+
+   ```markdown
+   ---
+   ticket: {{ARGUMENTS}}
+   title: [ticket title]
+   type: [bug / feature / improvement / chore]
+   researched: [ISO date]
+   status: pending_approval
+   complexity: [trivial / small / medium / large]
+   ---
+
+   ## Summary
+   [copy from research document — 2–4 sentences]
+
+   ## Relevant Files
+   [copy the file table from the research document]
+
+   ## Patterns to Follow
+   [copy from research document]
+
+   ## Key Decisions for the Planner
+   [copy from research document, or "none"]
+   ```
+
+   This artifact is read by `/ticket-plan` and `/ticket-process` to avoid re-parsing Linear comments.
+
 ---
 
 ## Status Transitions
@@ -184,4 +224,5 @@ Phase 5: Post & Transition
   save_comment: research document
   save_issue: Research Pending Approval
   save_comment: "next step: move to Research Approved"
+  write: thoughts/tickets/{{ARGUMENTS}}/research.md
 ```

@@ -72,18 +72,54 @@ From the ticket comments (already fetched in Phase 0), extract:
 - **Acceptance criteria** — from the original ticket description (Definition of Done, validation steps)
 - **Ticket type** — Bug fix / Feature / Improvement (determines review strategy)
 
-Cross-check with git to confirm what actually changed on the branch:
+**Also check the thought store for richer context:**
 
 ```bash
-cd "${WORKTREE}" && git log <main-branch>..HEAD --oneline
-cd "${WORKTREE}" && git diff <main-branch>...HEAD --name-only
+PLAN_ARTIFACT="thoughts/tickets/{{ARGUMENTS}}/plan.md"
+RESEARCH_ARTIFACT="thoughts/tickets/{{ARGUMENTS}}/research.md"
+[ -f "$PLAN_ARTIFACT" ] && echo "Plan artifact found — reading phase checklist and key files" || echo "No plan artifact"
+[ -f "$RESEARCH_ARTIFACT" ] && echo "Research artifact found — reading patterns and complexity" || echo "No research artifact"
 ```
 
-Replace `<main-branch>` with your project's integration branch (e.g. `main`, `develop`, `master`).
-
-If the ticket has no implementation comments and no commits beyond the main branch:
+If the ticket has no implementation comments and no commits beyond `develop`:
 
 - Post comment: *"No implementation found on branch `${BRANCH}`. Tagging Changes Required — nothing to review."*
+- Move to Changes Required and exit.
+
+---
+
+## Phase 2b — Validate Implementation Against Claims (Git Ground Truth)
+
+**This phase runs before code review or tests. It establishes what actually changed vs. what was claimed.**
+
+```bash
+cd "${WORKTREE}"
+
+# Actual changes on the branch
+ACTUAL_FILES=$(git diff develop...HEAD --name-only | sort)
+
+# Claimed changes from the process agent's completion comment
+# (extract file paths from the "Files changed" section — one path per line)
+CLAIMED_FILES=$(echo "[files extracted from completion comment]" | sort)
+
+echo "=== Actual files changed ==="
+echo "$ACTUAL_FILES"
+
+echo "=== Claimed files changed ==="
+echo "$CLAIMED_FILES"
+```
+
+Compare the two sets:
+
+1. **Files claimed but not present in git diff** → flag as "claimed but not implemented"
+2. **Files in git diff but not mentioned in completion comment** → flag as "undeclared scope change"
+3. **If total mismatch > 30% of claimed files**: post a comment noting the discrepancy and document it prominently in the review report — this does not block the review but must be visible
+
+Record discrepancies for inclusion in Phase 6 review comment under a "Scope Validation" section.
+
+If `ACTUAL_FILES` is empty (no commits beyond develop):
+
+- Post comment: *"No commits found on `${BRANCH}` beyond `develop`. Tagging Changes Required."*
 - Move to Changes Required and exit.
 
 ---
@@ -94,7 +130,7 @@ Launch an `Explore` agent (quick thoroughness) scoped to the changed files. Ask 
 
 - Confirm the implementation matches the acceptance criteria in the ticket
 - Flag missing error handling, edge cases, or obvious regressions
-- Note which test suites apply
+- Note which test suites apply (Rust / TypeScript / Frontend)
 
 Record: file paths, functions changed, any concerns with `file:line` references.
 
@@ -102,22 +138,31 @@ Record: file paths, functions changed, any concerns with `file:line` references.
 
 ## Phase 4 — Unit & Integration Tests
 
-Run all applicable test suites from the review worktree. Adapt commands to your project's tech stack:
+Run all applicable test suites from the review worktree. Run in parallel where independent:
+
+**Rust** (`core/`, `gateway/`, `starfish/`, `tokenization/`):
 
 ```bash
-# Run your project's test suite from the worktree
-cd "${WORKTREE}" && <your test command> 2>&1
+cd "${WORKTREE}" && cargo test --all 2>&1
 ```
 
-Common patterns:
-- Rust: `cargo test --all`
-- Node.js/TypeScript: `npm test` or `pnpm test`
-- Python: `pytest`
-- Go: `go test ./...`
+**Keeper / TypeScript**:
+
+```bash
+cd "${WORKTREE}/keeper" && npm test 2>&1
+```
+
+**Frontend**:
+
+```bash
+cd "${WORKTREE}/frontend-issuance" && pnpm lint && pnpm build 2>&1 | tail -40
+```
 
 **If the changed behavior has no test coverage** — write tests before judging:
 
-- Follow TDD: confirm the new test fails first on the main branch, passes on this branch
+- Rust: add `#[test]` or `#[tokio::test]` in the same module inside `$WORKTREE`
+- TypeScript: add a test in `$WORKTREE/keeper/src/__tests__/`
+- Follow TDD: confirm the new test fails first on `develop`, passes on this branch
 - Commit new tests to the branch:
 
   ```bash
@@ -149,10 +194,19 @@ mkdir -p "${PROOF_DIR}"
 
 ### UI Tickets (any frontend changes)
 
-Ensure services are running. Use Chrome DevTools MCP:
+Ensure services are running. If not:
+
+```bash
+just dev &
+sleep 15
+cd "${WORKTREE}/frontend-issuance" && pnpm dev &
+sleep 10
+```
+
+Use Chrome DevTools MCP:
 
 1. `mcp__chrome-devtools__new_page` — open fresh tab
-2. `mcp__chrome-devtools__navigate_page` → your local frontend URL
+2. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
 3. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
 
 Walk through **every acceptance criterion**. For each step:
@@ -175,7 +229,7 @@ Walk through **every acceptance criterion**. For each step:
   - `title`: `[Review] [Step N] [Short description]`
   - `subtitle`: `{{ARGUMENTS}} — review proof`
 
-  **Record the `url` returned by each `create_attachment` call.** These hosted URLs are embedded as inline markdown images in the Phase 6 review comment so reviewers see visual previews directly in Linear.
+  **Record the `url` returned by each `create_attachment` call.** These hosted URLs are embedded as inline markdown images in the Phase 6 review comment so reviewers see visual previews directly in Linear (not just sidebar download links).
 
 **Minimum required screenshots (all must be uploaded):**
 
@@ -186,15 +240,18 @@ Walk through **every acceptance criterion**. For each step:
 | Error / validation state | `step-3-error-state.png` | `[Review] [Step 3] Error state` |
 | Each additional criterion | `step-N-[criterion].png` | `[Review] [Step N] [Criterion]` |
 
-If the frontend is unreachable after attempting to start it — **this is a FAIL**:
+If `http://localhost:8105` is unreachable after attempting to start it — **this is a FAIL**:
 > "Browser validation failed — frontend could not be started. Blocking review."
 
-If the Chrome DevTools MCP tool fails — **do not skip screenshots**. Instead:
+If the Chrome DevTools MCP tool fails or returns an error (e.g. "browser connection unavailable", "no page found") — **do not skip screenshots**. Instead:
 
 1. Try `mcp__chrome-devtools__new_page` to open a fresh browser context and retry
-2. If that also fails, **this is a FAIL** — report it explicitly and move to Changes Required
+2. If that also fails, **this is a FAIL** — report it explicitly and move to Changes Required:
+   > "Browser validation failed — Chrome DevTools MCP unavailable. Cannot capture visual proof. Blocking review."
 
-**Never give PASS for a UI ticket without at least one screenshot uploaded to Linear.**
+**Never give PASS for a UI ticket without at least one screenshot uploaded to Linear.** Browser MCP failure is a blocking condition, not a reason to bypass the proof requirement.
+
+Do **not** proceed to Phase 6 without resolving it or marking FAIL.
 
 ### API / Backend Tickets (no frontend changes)
 
@@ -203,20 +260,22 @@ Run real curl commands against the live services. For each acceptance criterion:
 ```bash
 # Happy path
 RESPONSE=$(curl -s -w '\n{"http_status":%{http_code}}' \
-  -X POST http://localhost:<port>/[endpoint] \
+  -X POST http://localhost:8104/[endpoint] \
   -H 'Content-Type: application/json' \
   -d '[request body]')
 echo "${RESPONSE}" | tee "${PROOF_DIR}/api-[criterion-slug]-happy.json"
 
 # Error case
 RESPONSE=$(curl -s -w '\n{"http_status":%{http_code}}' \
-  -X POST http://localhost:<port>/[endpoint] \
+  -X POST http://localhost:8104/[endpoint] \
   -H 'Content-Type: application/json' \
   -d '[invalid body]')
 echo "${RESPONSE}" | tee "${PROOF_DIR}/api-[criterion-slug]-error.json"
 ```
 
 If a criterion involves a state change, confirm with a follow-up GET and save to `api-[criterion-slug]-confirm.json`.
+
+For Starfish-proxied endpoints requiring HMAC auth, use the demo credentials from `CLAUDE.md`.
 
 **Upload each JSON file to Linear:**
 
@@ -302,7 +361,7 @@ Build the review comment. Post via `mcp__linear-server__save_comment`. Every sec
 - `[path/to/file]` — [what changed]
 
 **Commits on branch:**
-[paste: git log <main-branch>..HEAD --oneline output]
+[paste: git log develop..HEAD --oneline output]
 
 **Acceptance criteria:**
 - [x] [criterion] — met / ❌ not met: [reason]
@@ -310,13 +369,29 @@ Build the review comment. Post via `mcp__linear-server__save_comment`. Every sec
 
 ---
 
+### Scope Validation
+
+**Claimed vs. actual files changed:**
+
+| File | Claimed ✓/✗ | In Git Diff ✓/✗ | Note |
+|---|---|---|---|
+| `[file path]` | ✓ | ✓ | matched |
+| `[file path]` | ✓ | ✗ | claimed but not changed |
+| `[file path]` | ✗ | ✓ | changed but not claimed |
+
+**Discrepancy level:** [none / minor / significant]
+
+---
+
 ### Test Results
 
 | Suite | Command | Outcome |
 |---|---|---|
-| [Suite name] | `[command]` | PASS ✅ / FAIL ❌ |
+| Rust | `cargo test --all` | PASS ✅ / FAIL ❌ |
+| Keeper | `npm test` | PASS ✅ / FAIL ❌ / skipped |
+| Frontend | `pnpm lint && pnpm build` | PASS ✅ / FAIL ❌ / skipped |
 
-**New tests written:** [yes: `path/to/test: test_name` / no]
+**New tests written:** [yes: `path/to/test.rs: test_name` / no]
 
 **Failure output** (if any):
 [paste full failure output — not truncated]
@@ -342,6 +417,12 @@ Build the review comment. Post via `mcp__linear-server__save_comment`. Every sec
 **API responses** (backend tickets — full JSON inline):
 
 `[METHOD] /[endpoint]` — [criterion] — happy path (HTTP [status]):
+```json
+[paste full response JSON]
+```
+
+`[METHOD] /[endpoint]` — [criterion] — error case (HTTP [status]):
+
 ```json
 [paste full response JSON]
 ```
@@ -376,6 +457,38 @@ To reproduce the failure immediately:
 
 ```
 
+After posting the review comment, write the review artifact:
+
+```bash
+mkdir -p "thoughts/tickets/{{ARGUMENTS}}"
+```
+
+Write to `thoughts/tickets/{{ARGUMENTS}}/review.md`:
+
+```markdown
+---
+ticket: {{ARGUMENTS}}
+branch: [branch name]
+reviewed: [ISO date]
+verdict: [PASS / FAIL]
+status_after: [Human Review / Changes Required]
+tests_passed: [yes / no]
+scope_discrepancy: [none / minor / significant]
+---
+
+## Verdict
+[PASS ✅ / FAIL ❌] — [1–2 sentences why]
+
+## Test Results Summary
+[copy from test results table]
+
+## Scope Validation
+[none / list discrepancies found]
+
+## Failures (FAIL only)
+[copy reproduction steps and root cause]
+```
+
 ---
 
 ## Phase 7 — Update Linear Status
@@ -389,7 +502,7 @@ GIT_EMAIL=$(git config user.email)
 **PASS → Human Review:**
 
 ```bash
-# Find "Human Review" status ID
+# Find "In Review" or "Human Review" status ID
 # mcp__linear-server__save_issue → { id, statusId: <human_review_id>, assignee: "<GIT_EMAIL>" }
 ```
 
@@ -416,6 +529,11 @@ The implementation worktree (`${WORKTREE}`) is **not touched** — it stays for 
 ```
 AskUserQuestion:
   "Review PASSED for {{ARGUMENTS}} — ready for human verification.
+
+  The system is still running:
+    Frontend:  http://localhost:8105
+    Starfish:  http://localhost:8101/swagger
+    Keeper:    http://localhost:8104
 
   Full review report posted to Linear ticket {{ARGUMENTS}}."
 ```
@@ -472,7 +590,7 @@ Required in every review comment:
 ## Orchestration Map
 
 ```
-/ticket-review TICKET-XX
+/ticket-review GYL-XX
         │
         ▼
 Phase 0: Find implementation branch from Linear comments
@@ -482,14 +600,21 @@ Phase 0: Find implementation branch from Linear comments
         │
         ▼
 Phase 1: Locate implementation worktree
-  wtp ls | grep feat/TICKET-XX  (reuse existing impl worktree)
-  → ../worktrees/feat/TICKET-XX  (shared with /ticket-process)
+  wtp ls | grep feat/GYL-XX  (reuse existing impl worktree)
+  → ../worktrees/feat/GYL-XX  (shared with /ticket-process)
         │
         ▼
 Phase 2: Understand implementation
-  git log <main-branch>..HEAD + git diff --name-only
+  git log develop..HEAD + read thoughts/ artifacts
+  extract claimed files from completion comment
         │
         ├── no commits? → save_comment + Changes Required → exit
+        │
+        ▼
+Phase 2b: Validate Against Git Ground Truth
+  git diff develop...HEAD --name-only (actual)
+  vs. claimed files from completion comment
+  flag: claimed-but-missing, undeclared-scope-changes
         │
         ▼
 Phase 3: Code Review
@@ -498,7 +623,9 @@ Phase 3: Code Review
         ▼
 Phase 4: Tests [parallel where independent]
   ┌──────────────────────────────────────────┐
-  │ <project test suite>                     │
+  │ cargo test --all (Rust changes)          │
+  │ cd keeper && npm test (TS changes)       │
+  │ pnpm lint+build (frontend changes)       │
   │ Write + commit new tests if gaps found   │
   └──────────────────────┬───────────────────┘
                          │
@@ -506,21 +633,24 @@ Phase 4: Tests [parallel where independent]
 Phase 5: Visual Proof [MANDATORY — no skip]
   ┌──────────────────────────────────────────────────┐
   │ UI tickets:                                      │
-  │   new_page → navigate frontend URL               │
+  │   new_page → navigate :8105                      │
   │   take_screenshot per acceptance criterion       │
   │   base64 → create_attachment → record url        │
+  │   → /tmp/screenshots/GYL-XX-review/step-N-*.png  │
   │                                                  │
   │ API/backend tickets:                             │
   │   curl happy path + error case per criterion     │
   │   base64 → create_attachment on Linear           │
+  │   → /tmp/screenshots/GYL-XX-review/api-*.json    │
   │                                                  │
   │ verify: get_issue attachment count matches       │
-  │ Empty proof dir = FAIL                           │
+  │ Empty proof dir = FAIL — AskUserQuestion         │
   └──────────────────────┬───────────────────────────┘
                          │
                          ▼
 Phase 6: Verdict + Review Comment
   save_comment: tests + ![img](url) previews + JSON code blocks
+  write: thoughts/tickets/{{ARGUMENTS}}/review.md
                          │
                ┌─────────┴──────────┐
              PASS                 FAIL
@@ -532,7 +662,8 @@ Phase 7: Update Linear Status
                ▼                   ▼
 Phase 8: Hand Off
   AskUserQuestion:           Inform user: FAILED
-  "PASSED — verify."         (worktree kept for implementer)
+  "PASSED — verify at        (worktree kept for implementer)
+   localhost:8105."
                │
                ▼
 Phase 9: No clean up — worktree owned by /ticket-process

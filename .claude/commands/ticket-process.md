@@ -24,8 +24,8 @@ First, fetch the ticket to determine the branch prefix (bug → `fix/`, feature 
 TICKET="{{ARGUMENTS}}"
 BRANCH_TYPE="feat"  # or "fix" based on ticket labels — set this first
 
-BRANCH="${BRANCH_TYPE}/${TICKET}"   # e.g. feat/TICKET-15
-WORKTREE="../worktrees/${BRANCH}"   # e.g. ../worktrees/feat/TICKET-15
+BRANCH="${BRANCH_TYPE}/${TICKET}"   # e.g. feat/GYL-15
+WORKTREE="../worktrees/${BRANCH}"   # e.g. ../worktrees/feat/GYL-15
 ```
 
 Check if worktree already exists (idempotent — supports resuming interrupted work):
@@ -46,7 +46,41 @@ Verify the worktree path:
 command wtp cd "${BRANCH}"   # prints absolute path — confirm it matches expectations
 ```
 
-> All subsequent file operations (Read, Edit, Write, Bash, tests) **must use `$WORKTREE` as the base path**, not the main repo directory. The worktree has the same codebase as the main branch at branch point but is fully isolated.
+> All subsequent file operations (Read, Edit, Write, Bash, tests) **must use `$WORKTREE` as the base path**, not the main repo directory. The worktree has the same codebase as `develop` at branch point but is fully isolated.
+
+---
+
+---
+
+## Phase 0.5 — Resumption Check
+
+Before fetching the ticket from Linear, check if prior work exists for this ticket:
+
+```bash
+HANDOFF="thoughts/tickets/{{ARGUMENTS}}/handoff.md"
+PLAN_ARTIFACT="thoughts/tickets/{{ARGUMENTS}}/plan.md"
+
+if [ -f "$HANDOFF" ]; then
+  echo "=== Prior handoff found for {{ARGUMENTS}} ==="
+  cat "$HANDOFF"
+  echo ""
+  echo "Checking git state..."
+  HANDOFF_COMMIT=$(grep '^git_commit:' "$HANDOFF" | awk '{print $2}')
+  CURRENT_COMMIT=$(cd "${WORKTREE}" && git rev-parse HEAD 2>/dev/null || echo "unknown")
+  echo "Handoff commit : $HANDOFF_COMMIT"
+  echo "Current HEAD   : $CURRENT_COMMIT"
+fi
+```
+
+**If a handoff exists:**
+
+- Read `last_completed_phase` from the handoff YAML frontmatter
+- Read `git_commit` from the handoff and compare to current `HEAD` in the worktree
+- If commits match: skip all phases up to and including `last_completed_phase`, resume from the next phase
+- If commits differ (new work was pushed externally): note the divergence, start from Phase 3 (re-explore, don't re-implement from scratch)
+- Post a comment: *"Resuming {{ARGUMENTS}} from Phase [N+1]. Prior work detected in worktree — [1 sentence on what was already done]."*
+
+**If no handoff exists:** proceed normally from Phase 1.
 
 ---
 
@@ -57,6 +91,19 @@ Fetch everything in parallel:
 1. `mcp__linear-server__get_issue` — full ticket details
 2. `mcp__linear-server__list_issue_statuses` — valid status IDs for the team
 3. `mcp__linear-server__list_comments` — prior discussion and previous attempt notes
+
+**Check thought store for plan artifact (preferred over comment parsing):**
+
+```bash
+PLAN_ARTIFACT="thoughts/tickets/{{ARGUMENTS}}/plan.md"
+if [ -f "$PLAN_ARTIFACT" ]; then
+  echo "Plan artifact found — reading approved phase checklist"
+  # Extract: phases, key files, scope boundaries from the artifact
+  # This is the canonical implementation spec — treat it as locked design
+else
+  echo "No plan artifact — will find plan in Linear comments"
+fi
+```
 
 Parse and record:
 
@@ -92,13 +139,35 @@ If description is too vague (< 2 actionable sentences):
 
 3. `mcp__linear-server__save_issue` → `{ id, statusId: <in_progress_id>, assignee: "<GIT_EMAIL>" }`
 4. `mcp__linear-server__save_comment`:
-   > "Picked up in isolated worktree on branch `feat/{{ARGUMENTS}}`. Plan: [1–3 sentence summary]. Changes are isolated to this branch — nothing touches the main branch until pushed."
+   > "Picked up in isolated worktree on branch `feat/{{ARGUMENTS}}`. Plan: [1–3 sentence summary]. Changes are isolated to this branch — nothing touches `develop` until pushed."
+
+5. Write initial handoff artifact:
+
+   ```bash
+   mkdir -p "thoughts/tickets/{{ARGUMENTS}}"
+   ```
+
+   Write to `thoughts/tickets/{{ARGUMENTS}}/handoff.md`:
+
+   ```markdown
+   ---
+   ticket: {{ARGUMENTS}}
+   branch: [BRANCH value]
+   git_commit: [git rev-parse HEAD from worktree]
+   last_completed_phase: 2
+   date: [current ISO timestamp]
+   status: in_progress
+   ---
+
+   ## Claimed
+   Set to In Progress. Branch: [BRANCH]. Plan: [1–3 sentence summary from claiming comment].
+   ```
 
 ---
 
 ## Phase 3 — Explore & Plan
 
-All exploration reads code from the worktree path (`$WORKTREE`), which mirrors the main branch.
+All exploration reads code from the worktree path (`$WORKTREE`), which mirrors `develop`.
 
 **Bug tickets**: Launch `bug-investigator` agent — provide title, description, error messages, and the worktree path as the code root
 
@@ -130,24 +199,44 @@ If a blocker is hit during implementation:
 1. `mcp__linear-server__save_comment`: *"Blocked in `feat/{{ARGUMENTS}}`: [blocker]. [Proposed resolution]."*
 2. `AskUserQuestion` to unblock, then resume
 
+After the `senior-implementer` agent completes, update the handoff:
+
+```bash
+CURRENT_COMMIT=$(cd "${WORKTREE}" && git rev-parse HEAD)
+```
+
+Update `thoughts/tickets/{{ARGUMENTS}}/handoff.md` — change `last_completed_phase` to `4` and `git_commit` to `$CURRENT_COMMIT`. Add a section:
+
+```markdown
+## Phase 4 Complete
+Implementation done. Key files changed: [list from implementer output].
+```
+
 ---
 
 ## Phase 5a — Automated Tests
 
-Run test suites **from the worktree path**. Adapt commands to your project's tech stack:
+Run test suites **from the worktree path**. Run all that apply:
 
 ```bash
-# Example: run your project's test suite from the worktree
-cd "${WORKTREE}" && <your test command> 2>&1
+# Rust (core/, gateway/, starfish/, tokenization/)
+cd "${WORKTREE}" && cargo test --all 2>&1
+
+# Keeper / TypeScript
+cd "${WORKTREE}/keeper" && npm test 2>&1
+
+# Frontend
+cd "${WORKTREE}/frontend-issuance" && pnpm lint && pnpm build 2>&1 | tail -30
 ```
 
-Common patterns:
-- Rust: `cargo test --all`
-- Node.js/TypeScript: `npm test` or `pnpm test`
-- Python: `pytest`
-- Go: `go test ./...`
-
 If tests fail: attempt to fix (up to 2 iterations). After 2 failed attempts, post a comment with full output and `AskUserQuestion`.
+
+Update `thoughts/tickets/{{ARGUMENTS}}/handoff.md` — set `last_completed_phase: "5a"`. Append:
+
+```markdown
+## Phase 5a Complete
+Tests: [pass/fail summary — suites run and outcomes].
+```
 
 ---
 
@@ -162,12 +251,12 @@ PROOF_DIR="/tmp/screenshots/{{ARGUMENTS}}"
 mkdir -p "${PROOF_DIR}"
 ```
 
-### UI Tickets (any frontend changes)
+### UI Tickets (any change under `frontend-issuance/`)
 
-Ensure the frontend and its backing services are running. Then use Chrome DevTools MCP:
+Ensure the frontend and its backing services are running (start via `just up` or `just dev` + `just dev-frontend` if not already). Then use Chrome DevTools MCP:
 
 1. `mcp__chrome-devtools__new_page` — open a fresh tab
-2. `mcp__chrome-devtools__navigate_page` → your local frontend URL
+2. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
 3. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
 
 Walk through **every acceptance criterion** that has a visible outcome. For each step:
@@ -200,7 +289,18 @@ Walk through **every acceptance criterion** that has a visible outcome. For each
 | Error / validation state | `step-3-error-state.png` | `[Step 3] Error/validation state` |
 | Each additional criterion | `step-N-[criterion].png` | `[Step N] [Criterion description]` |
 
-If the Chrome DevTools MCP tool fails — try `mcp__chrome-devtools__new_page` to open a fresh context and retry once. If that also fails, **raise via `AskUserQuestion`** — never silently skip screenshots for UI tickets.
+If the frontend is not reachable, attempt to start it:
+
+```bash
+cd "${WORKTREE}/frontend-issuance" && pnpm dev &
+sleep 10
+curl -sf http://localhost:8105 || echo "Frontend did not start"
+```
+
+If it still fails after one attempt — **raise via `AskUserQuestion`** before proceeding:
+> "Frontend could not be started for visual proof. Should I continue without UI screenshots or would you like to investigate the startup failure?"
+
+If the Chrome DevTools MCP tool fails or returns an error (e.g. "browser connection unavailable") — try `mcp__chrome-devtools__new_page` to open a fresh context and retry once. If that also fails, **raise via `AskUserQuestion`** — never silently skip screenshots for UI tickets.
 
 ### API / Backend Tickets (no frontend changes)
 
@@ -209,7 +309,7 @@ Run real curl commands against the live local services. For each acceptance crit
 ```bash
 # Adapt method, path, headers, and body to the actual endpoint
 RESPONSE=$(curl -s -w '\n{"http_status":%{http_code}}' \
-  -X POST http://localhost:<port>/[endpoint] \
+  -X POST http://localhost:8104/[endpoint] \
   -H 'Content-Type: application/json' \
   -d '[request body]')
 echo "${RESPONSE}" | tee "${PROOF_DIR}/api-proof-[criterion]-happy.json"
@@ -279,7 +379,7 @@ Local file existence alone is not sufficient — only a non-zero `attachments` c
    ```
 
 3. Update ticket status:
-   - Changes pushed, review needed → find "Review Pending" status ID → `mcp__linear-server__save_issue`
+   - Changes pushed, PR or human review needed → find "Review Pending" status ID → `mcp__linear-server__save_issue`
    - Self-contained and complete → find "Done" status ID → `mcp__linear-server__save_issue`
 
 4. Post completion comment — **include the branch name so `/ticket-review` can find it**:
@@ -297,7 +397,10 @@ Local file existence alone is not sufficient — only a non-zero `attachments` c
    **Tests:** [summary — suites run, pass/fail counts]
 
    **Proof of working behaviour** (attachments uploaded to this ticket):
-   - [list every uploaded attachment filename with a brief description]
+   - 📸 `step-1-initial-state.png` — [what it shows]
+   - 📸 `step-2-happy-path.png` — [what it shows]
+   - 📸 `step-3-error-state.png` — [what it shows]
+   (list every uploaded attachment filename)
 
    **Screenshots (inline previews):**
    ![Step 1 — Initial state]([url from create_attachment for step-1])
@@ -307,6 +410,12 @@ Local file existence alone is not sufficient — only a non-zero `attachments` c
    **API responses** (if backend ticket — embed full JSON inline):
 
    `POST /[endpoint]` — happy path (HTTP [status]):
+   ```json
+   [paste full response JSON]
+   ```
+
+   `POST /[endpoint]` — error case (HTTP [status]):
+
    ```json
    [paste full response JSON]
    ```
@@ -346,7 +455,7 @@ In Progress     →  Done             (Phase 6, self-contained)
 
 1. **Phase 0 first** — `wtp add` before any file operation
 2. **All paths use `$WORKTREE`** — never read or write files in the main repo during implementation
-3. **Never work on the main branch directly** — the worktree branch is the blast radius boundary
+3. **Never work on `develop` directly** — the worktree branch is the blast radius boundary
 4. **Push before handing off** — `/ticket-review` needs the branch on origin
 5. **Record branch name in completion comment** — the reviewer reads this to find the branch
 6. **Do not remove the worktree** — it persists for `/ticket-review`
@@ -355,18 +464,25 @@ In Progress     →  Done             (Phase 6, self-contained)
 ## Orchestration Map
 
 ```
-/ticket-process TICKET-XX
+/ticket-process GYL-XX
         │
         ▼
-Phase 0: wtp add -b feat/TICKET-XX
-  → ../worktrees/feat/TICKET-XX (isolated, managed by wtp)
+Phase 0: wtp add -b feat/GYL-XX
+  → ../worktrees/feat/GYL-XX (isolated, managed by wtp)
+        │
+        ▼
+Phase 0.5: Resumption Check
+  thoughts/tickets/GYL-XX/handoff.md exists?
+  ├── yes + git commit matches → skip to phase after last_completed_phase
+  ├── yes + git diverged → resume from Phase 3
+  └── no → continue from Phase 1
         │
         ▼
 Phase 1: Fetch & Analyze [parallel]
   get_issue + list_issue_statuses + list_comments
         │
         ├── child ticket? → fetch parent + siblings → check prerequisites
-        │     └── blocking sibling not started? → restart with prereq ticket ID first
+        │     └── blocking sibling not started? → restart with prereq ticket ID first, then return to {{ARGUMENTS}}
         │
         ├── vague? → save_comment + AskUserQuestion
         │
@@ -392,7 +508,7 @@ Phase 4: Implement [cd $WORKTREE]
                │
                ▼
 Phase 5a: Automated Tests [cd $WORKTREE]
-  <project test suite>
+  cargo test / npm test / pnpm lint+build
                │
                ├── fail? → fix (×2) → save_comment + AskUserQuestion
                │
@@ -400,14 +516,16 @@ Phase 5a: Automated Tests [cd $WORKTREE]
 Phase 5b: Visual Proof [MANDATORY]
   ┌─────────────────────────────────────────────────┐
   │ UI tickets:                                     │
-  │   new_page → navigate frontend URL              │
+  │   new_page → navigate :8105                     │
   │   take_screenshot per acceptance criterion      │
   │   base64 encode → create_attachment on Linear   │
   │   record returned url for inline previews       │
+  │   → /tmp/screenshots/GYL-XX/step-N-*.png        │
   │                                                 │
   │ API/backend tickets:                            │
   │   curl happy path + error case                  │
   │   base64 encode → create_attachment on Linear   │
+  │   → /tmp/screenshots/GYL-XX/api-proof-*.json    │
   │                                                 │
   │ verify: get_issue attachments count matches     │
   └──────────────────────┬──────────────────────────┘
@@ -416,7 +534,7 @@ Phase 5b: Visual Proof [MANDATORY]
                │
                ▼
 Phase 6: Commit + Push + Hand Off
-  git commit + git push origin feat/TICKET-XX
+  git commit + git push origin feat/GYL-XX
   save_issue: Review Pending / Done
   save_comment: branch name + changes + proof filenames + inline image previews
   [worktree kept for /ticket-review]

@@ -8,3 +8,6 @@ scripts/autonomous-approve-logs/
 
 # macOS
 .DS_Store
+
+# Thought store — ticket artifacts are ephemeral (local-only)
+thoughts/tickets/

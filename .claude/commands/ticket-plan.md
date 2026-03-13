@@ -26,7 +26,20 @@ Parse and record:
 - **Research comment** — find the comment containing `## Research: {{ARGUMENTS}}` (posted by the research agent)
 - Extract from research: relevant files, patterns to follow, complexity estimate, key decisions
 
-If no research comment exists, treat the ticket description as the only input — do not block, but note the absence in the plan.
+**Check for research artifact first (preferred over comment parsing):**
+
+```bash
+RESEARCH_ARTIFACT="thoughts/tickets/{{ARGUMENTS}}/research.md"
+if [ -f "$RESEARCH_ARTIFACT" ]; then
+  echo "Reading research artifact from thought store..."
+  # Read the artifact — it contains summary, relevant files, patterns, key decisions
+  # Use this as the primary research input
+else
+  echo "No research artifact found — falling back to Linear comment scan"
+fi
+```
+
+If neither the artifact nor a research comment exists, treat the ticket description as the only input — note the absence in the plan.
 
 Set ticket status to `Planning` (claim it before exploring):
 
@@ -45,10 +58,23 @@ Using the research findings as the starting point, identify what still needs dee
 
 Spawn focused `Explore` agents for any gaps — only what is genuinely needed. Examples:
 
-- **Interface agent** — "Show me the exact types for [interface/struct]. Return the definition with file:line."
-- **Dependency agent** — "What does [component X] depend on? List imports and trait implementations."
-- **Test pattern agent** — "Show me how tests are structured for [component]. What setup helpers exist?"
-- **Migration agent** — "Find existing SQL migrations in this repo. Show the naming convention and a representative example."
+Each sub-agent prompt must lead with its prohibition contract:
+
+- **INTERFACE AGENT**
+  `MUST NOT: Suggest type improvements. Flag design issues. Recommend alternatives.`
+  `ONLY DO: Show me the exact type definitions for [interface/struct]. Return the definition with file:line. Nothing more.`
+
+- **DEPENDENCY AGENT**
+  `MUST NOT: Critique coupling. Suggest refactors. Flag architecture issues.`
+  `ONLY DO: List what [component X] imports and what traits/interfaces it implements. Return file:line refs for each dependency. No analysis.`
+
+- **TEST PATTERN AGENT**
+  `MUST NOT: Assess test quality. Recommend improvements. Flag gaps.`
+  `ONLY DO: Show me how existing tests for [component] are structured — test file path, setup helpers used, how fixtures are constructed. I need examples to copy, not critiques.`
+
+- **MIGRATION AGENT**
+  `MUST NOT: Suggest schema improvements. Flag normalization issues.`
+  `ONLY DO: Find existing SQL migration files. Show the file naming convention and one representative example of the migration format used in this repo. No recommendations.`
 
 Spawn agents in parallel. Wait for **ALL** before proceeding.
 
@@ -171,6 +197,45 @@ Manual:
 3. Post a final summary comment:
    > "Implementation plan posted above. **Next step:** review the plan and move ticket to **Plan Approved** to trigger the coding agent (`/ticket-process`)."
 
+4. Write plan artifact to the persistent thought store:
+
+   ```bash
+   mkdir -p "thoughts/tickets/{{ARGUMENTS}}"
+   ```
+
+   Write to `thoughts/tickets/{{ARGUMENTS}}/plan.md`:
+
+   ```markdown
+   ---
+   ticket: {{ARGUMENTS}}
+   title: [ticket title]
+   type: [bug / feature / improvement / chore]
+   planned: [ISO date]
+   status: pending_approval
+   estimated_scope: [trivial / small / medium / large]
+   phases: [number of phases]
+   ---
+
+   ## Overview
+   [copy from plan — 2–3 sentences on approach]
+
+   ## What We're NOT Doing
+   [copy scope boundaries]
+
+   ## Phase Checklist
+   - [ ] Phase 1 — [name]: [goal in one sentence] | Files: [comma-separated file list]
+   - [ ] Phase 2 — [name]: [goal in one sentence] | Files: [comma-separated file list]
+   [continue for all phases]
+
+   ## Key Files
+   [list of files to change with brief descriptions]
+
+   ## Testing Strategy
+   [copy from plan]
+   ```
+
+   This artifact is read by `/ticket-process` to skip Linear comment re-parsing and enforce the approved scope.
+
 ---
 
 ## Status Transitions
@@ -222,4 +287,5 @@ Phase 5: Post & Transition
   save_comment: implementation plan
   save_issue: Plan Pending Approval
   save_comment: "next step: move to Plan Approved"
+  write: thoughts/tickets/{{ARGUMENTS}}/plan.md
 ```
