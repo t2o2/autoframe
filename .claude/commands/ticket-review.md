@@ -12,21 +12,30 @@ Ticket ID: {{ARGUMENTS}}
 
 ---
 
-## Phase 0 — Locate the Implementation Branch
+## Phase 0 — Claim & Locate the Implementation Branch
 
 Read the ticket comments to find the implementation branch posted by `/ticket-process`:
 
-1. `mcp__linear-server__get_issue` and `mcp__linear-server__list_comments` — in parallel
+1. `mcp__linear-server__get_issue`, `mcp__linear-server__list_issue_statuses`, and `mcp__linear-server__list_comments` — in parallel
 
-2. Scan comments for a line matching: `**Branch:** \`feat/{{ARGUMENTS}}\`` or `\`fix/{{ARGUMENTS}}\``
+2. Set status to `In Review` immediately (claim before any other work):
 
-3. If no branch is found in comments, fall back to checking git:
+   ```
+   mcp__linear-server__save_issue → { id, statusId: <in_review_id> }
+   ```
+
+   Post a claiming comment:
+   > "Picking up review for {{ARGUMENTS}}. Running tests and validating the implementation."
+
+3. Scan comments for a line matching: `**Branch:** \`feat/{{ARGUMENTS}}\`` or `\`fix/{{ARGUMENTS}}\``
+
+4. If no branch is found in comments, fall back to checking git:
 
    ```bash
    git branch -r | grep "{{ARGUMENTS}}"
    ```
 
-4. If still no branch exists — post a comment and stop:
+5. If still no branch exists — post a comment and stop:
    > "Review started for {{ARGUMENTS}}. No implementation branch found in comments or on origin. Cannot review. Moving to Changes Required — please run `/ticket-process {{ARGUMENTS}}` first."
 
    Move to Changes Required and exit.
@@ -550,7 +559,7 @@ The worktree used for review is the implementation worktree — it is owned by `
 ## Status Transition Map
 
 ```
-Review Pending  →  In Review        (Phase 1, on claim)
+Review Pending  →  In Review        (Phase 0, on claim)
 In Review       →  Human Review     (PASS: all tests green, criteria met)
 In Review       →  Changes Required (FAIL: any test red, criteria missed)
 ```
@@ -594,8 +603,10 @@ Required in every review comment:
 /ticket-review GYL-XX
         │
         ▼
-Phase 0: Find implementation branch from Linear comments
-  get_issue + list_comments [parallel]
+Phase 0: Claim & find implementation branch
+  get_issue + list_issue_statuses + list_comments [parallel]
+  save_issue: In Review  (claim immediately)
+  save_comment: "Picking up review..."
         │
         ├── no branch? → save_comment + Changes Required → exit
         │
