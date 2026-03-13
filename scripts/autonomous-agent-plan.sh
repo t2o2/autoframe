@@ -29,7 +29,6 @@ fi
 
 POLL_INTERVAL=60
 HEARTBEAT_INTERVAL=30
-TICKET_TIMEOUT=1800   # max seconds for a single ticket (default 30 min)
 RUN_ONCE=false
 RESET_CACHE=false
 
@@ -494,15 +493,9 @@ process_ticket() {
 
     start_stale_watchdog "$ticket_id" "$HB_FILE" "Research Approved" "$PIPELINE_PID"
 
-    ( sleep "$TICKET_TIMEOUT" && \
-      kill -- "-$(ps -o pgid= -p "$PIPELINE_PID" 2>/dev/null | tr -d ' ')" 2>/dev/null ) &
-    WATCHDOG_PID=$!
-
     wait "$PIPELINE_PID"
     exit_code=$?
     PIPELINE_PID=""
-    kill "$WATCHDOG_PID" 2>/dev/null || true
-    wait "$WATCHDOG_PID" 2>/dev/null || true
 
     stop_stale_watchdog
     rm -f "$HB_FILE"

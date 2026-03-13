@@ -29,7 +29,6 @@ fi
 
 POLL_INTERVAL=60
 HEARTBEAT_INTERVAL=30
-TICKET_TIMEOUT=1800   # max seconds for a single ticket (default 30 min)
 RUN_ONCE=false
 RESET_CACHE=false
 
@@ -518,8 +517,6 @@ process_ticket() {
     # ── Live streaming pipeline ───────────────────────────────────────────────
     # Run in background so the INT trap can kill it immediately on Ctrl-C.
     # tee saves raw stream-json; processor formats output and emits Phase banners.
-    # Watchdog: kill the pipeline group after TICKET_TIMEOUT seconds without
-    # wrapping claude itself (timeout(1) can silently suppress claude output).
     (
         claude --dangerously-skip-permissions \
                --no-session-persistence \
@@ -532,16 +529,9 @@ process_ticket() {
 
     start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID"
 
-    # Watchdog kills the pipeline group after TICKET_TIMEOUT seconds
-    ( sleep "$TICKET_TIMEOUT" && \
-      kill -- "-$(ps -o pgid= -p "$PIPELINE_PID" 2>/dev/null | tr -d ' ')" 2>/dev/null ) &
-    WATCHDOG_PID=$!
-
     wait "$PIPELINE_PID"
     exit_code=$?
     PIPELINE_PID=""
-    kill "$WATCHDOG_PID" 2>/dev/null || true
-    wait "$WATCHDOG_PID" 2>/dev/null || true
 
     stop_stale_watchdog
     rm -f "$HB_FILE"
