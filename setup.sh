@@ -73,14 +73,25 @@ EOF
 
 ok "Wrote config to .auto-claude/.env"
 
-# ── Optional: copy to target repo ─────────────────────────────────────────────
+# ── Copy scripts to target repo ───────────────────────────────────────────────
 
 echo ""
-echo -n "Copy agent scripts to a target repo? Enter path (or press Enter to skip): "
-read -r TARGET_REPO
+echo -e "${BOLD}Copy scripts${RESET}"
+echo ""
+echo -e "  Default destination: ${CYAN}$(pwd)${RESET}"
+echo -n "  Press Enter to confirm, type a different path, or 'n' to skip: "
+read -r TARGET_REPO_INPUT
+
+if [[ "$TARGET_REPO_INPUT" == "n" || "$TARGET_REPO_INPUT" == "N" ]]; then
+    info "Skipping script copy."
+    TARGET_REPO=""
+elif [[ -n "$TARGET_REPO_INPUT" ]]; then
+    TARGET_REPO="${TARGET_REPO_INPUT/#\~/$HOME}"
+else
+    TARGET_REPO="$(pwd)"
+fi
 
 if [[ -n "$TARGET_REPO" ]]; then
-    TARGET_REPO="${TARGET_REPO/#\~/$HOME}"  # expand ~
     if [[ ! -d "$TARGET_REPO" ]]; then
         error "Directory not found: $TARGET_REPO"
     else
@@ -95,9 +106,9 @@ if [[ -n "$TARGET_REPO" ]]; then
         if [[ ! -f "$TARGET_REPO/.auto-claude/.env" ]]; then
             mkdir -p "$TARGET_REPO/.auto-claude"
             cp "$ENV_FILE" "$TARGET_REPO/.auto-claude/.env"
-            ok "Wrote .auto-claude/.env to target repo"
+            ok "Wrote .auto-claude/.env to $(basename "$TARGET_REPO")"
         else
-            info "Skipped .auto-claude/.env (already exists in target repo)"
+            info "Skipped .auto-claude/.env (already exists)"
         fi
 
         ok "Copied scripts and commands to: $TARGET_REPO"
