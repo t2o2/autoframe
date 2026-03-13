@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# autonomous-agent.sh
+# autonomous-agent-planning.sh
 #
-# Polls Linear for "Todo" and "Changes Required" tickets, then processes them
-# one-by-one using /ticket-process. Shows live streaming output with real-time
+# Polls Linear for "Research Approved" tickets, then creates implementation plans for them
+# one-by-one using /ticket-plan. Shows live streaming output with real-time
 # phase banners and a structured per-phase summary at the end of each ticket.
 #
 # Usage:
-#   ./scripts/autonomous-agent.sh [--poll-interval <seconds>] [--once] [--reset]
+#   ./scripts/autonomous-agent-planning.sh [--poll-interval <seconds>] [--once] [--reset]
 #
 # Flags:
 #   --poll-interval <n>   Seconds between polls when idle (default: 60)
@@ -18,20 +18,14 @@ set -uo pipefail
 # ── Config ───────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$SCRIPT_DIR/autonomous-agent-logs"
-PROCESSED_FILE="/tmp/autonomous-agent-processed.txt"
+LOG_DIR="$SCRIPT_DIR/autonomous-planning-logs"
+PROCESSED_FILE="/tmp/autonomous-planning-processed.txt"
 
 # Load LINEAR_API_KEY from .auto-claude/.env if not already set
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [[ -z "${LINEAR_API_KEY:-}" && -f "$REPO_ROOT/.auto-claude/.env" ]]; then
     LINEAR_API_KEY="$(grep -E '^LINEAR_API_KEY=' "$REPO_ROOT/.auto-claude/.env" | cut -d= -f2 | cut -d' ' -f1)"
 fi
-
-# Load LINEAR_TEAM_KEY from .auto-claude/.env if not already set
-if [[ -z "${LINEAR_TEAM_KEY:-}" && -f "$REPO_ROOT/.auto-claude/.env" ]]; then
-    LINEAR_TEAM_KEY="$(grep -E '^LINEAR_TEAM_KEY=' "$REPO_ROOT/.auto-claude/.env" | cut -d= -f2 | cut -d' ' -f1)"
-fi
-LINEAR_TEAM_KEY="${LINEAR_TEAM_KEY:-ENG}"  # fallback default
 
 POLL_INTERVAL=60
 HEARTBEAT_INTERVAL=30
@@ -64,31 +58,25 @@ BOLD='\033[1m'
 DIM='\033[2m'
 RESET='\033[0m'
 
-# ── Stream processor (written to a temp file so it can be used in a pipeline) ─
-# This python3 script reads stream-json from stdin, prints formatted output,
-# and emits a visible banner whenever a new Phase starts.
+# ── Stream processor ──────────────────────────────────────────────────────────
 
-PROCESSOR="/tmp/ticket-processor-$$.py"
+PROCESSOR="/tmp/planning-processor-$$.py"
 
 cat > "$PROCESSOR" << 'PYEOF'
 #!/usr/bin/env python3
-"""
-Reads Claude stream-json from stdin.
-Prints formatted output with real-time Phase transition banners.
-Usage: python3 <script> <ticket_id>
-"""
-import sys, json, re
+import sys, json, re, os
 
-ticket_id = sys.argv[1] if len(sys.argv) > 1 else "TICKET-?"
+ticket_id = sys.argv[1] if len(sys.argv) > 1 else "GYL-?"
+heartbeat_file = sys.argv[2] if len(sys.argv) > 2 else None
 
 R  = '\033[0m'
-BL = '\033[0;34m'   # blue
-MG = '\033[0;35m'   # magenta
-GN = '\033[0;32m'   # green
-RD = '\033[0;31m'   # red
-BD = '\033[1m'      # bold
-DM = '\033[2m'      # dim
-YL = '\033[1;33m'   # yellow
+BL = '\033[0;34m'
+MG = '\033[0;35m'
+GN = '\033[0;32m'
+RD = '\033[0;31m'
+BD = '\033[1m'
+DM = '\033[2m'
+YL = '\033[1;33m'
 
 PHASE_RE = re.compile(r'##\s+(Phase\s+\d+[ab]?\s*[—–-]+\s*[^\n]+)', re.IGNORECASE)
 
@@ -106,6 +94,10 @@ for raw in sys.stdin:
     except Exception:
         continue
 
+    if heartbeat_file:
+        try: os.utime(heartbeat_file, None)
+        except OSError: pass
+
     etype = event.get('type', '')
 
     if etype == 'assistant':
@@ -113,11 +105,9 @@ for raw in sys.stdin:
             btype = block.get('type', '')
             if btype == 'text':
                 text = block.get('text', '')
-                # Detect phase transitions
                 m = PHASE_RE.search(text)
                 if m:
                     new_phase = m.group(1).strip()
-                    # Normalize dashes
                     new_phase = re.sub(r'\s*[—–-]+\s*', ' — ', new_phase, count=1)
                     if new_phase != current_phase:
                         emit(f'\n{MG}{"━"*3} ▶ {BD}{new_phase}{R}{MG} {"━"*28}{R}')
@@ -127,7 +117,6 @@ for raw in sys.stdin:
             elif btype == 'tool_use':
                 name = block.get('name', '')
                 inp  = block.get('input', {})
-                # Show a concise summary of what the tool is doing
                 hint = ''
                 if name in ('Bash', 'bash'):
                     cmd = (inp.get('command') or '')[:80]
@@ -138,13 +127,12 @@ for raw in sys.stdin:
                 elif name in ('Read', 'Edit', 'Write', 'Glob', 'Grep'):
                     path = inp.get('file_path') or inp.get('path') or inp.get('pattern') or ''
                     hint = f'  {DM}{path}{R}'
-                emit(f'{DM}[{ticket_id}] 🔧  {name}{hint}{R}')
+                emit(f'{DM}[{ticket_id}] 📐  {name}{hint}{R}')
 
     elif etype == 'tool_use':
-        # top-level tool_use events (outside assistant wrapper)
         name = event.get('name', '')
         if name:
-            emit(f'{DM}[{ticket_id}] 🔧  {name}{R}')
+            emit(f'{DM}[{ticket_id}] 📐  {name}{R}')
 
     elif etype == 'result':
         if event.get('is_error'):
@@ -152,7 +140,6 @@ for raw in sys.stdin:
             emit(f'{RD}[{ticket_id}] ❌  Error: {err}{R}')
 
     elif etype == 'system':
-        # Initial session info — show a subtle note
         subtype = event.get('subtype', '')
         if subtype == 'init':
             emit(f'{DM}[{ticket_id}] Session started{R}')
@@ -198,7 +185,7 @@ start_heartbeat() {
         while true; do
             sleep "$HEARTBEAT_INTERVAL"
             elapsed=$((elapsed + HEARTBEAT_INTERVAL))
-            printf "${DIM}[$(date '+%H:%M:%S')] ⏳  Still processing ${BOLD}%s${RESET}${DIM}... %dm%ds elapsed${RESET}\n" \
+            printf "${DIM}[$(date '+%H:%M:%S')] ⏳  Still planning ${BOLD}%s${RESET}${DIM}... %dm%ds elapsed${RESET}\n" \
                 "$ticket_id" $((elapsed / 60)) $((elapsed % 60))
         done
     ) &
@@ -213,13 +200,12 @@ stop_heartbeat() {
     fi
 }
 
-# ── Phase summary (generated from the stream-json log after ticket completes) ─
+# ── Phase summary ─────────────────────────────────────────────────────────────
 
 summarize_phases() {
     local ticket_id="$1"
     local log_file="$2"
 
-    # Extract all assistant text blocks from the raw stream-json log
     local full_text
     full_text=$(python3 - < "$log_file" 2>/dev/null << 'PYEOF'
 import sys, json
@@ -247,22 +233,18 @@ PYEOF
     divider "═" "Phase Summary — $ticket_id"
     echo ""
 
-    # Feed to claude for a concise per-phase conclusion
     printf '%s' "$full_text" \
     | head -c 18000 \
     | claude --dangerously-skip-permissions --no-session-persistence -p \
-        "Below is the raw output from processing Linear ticket ${ticket_id} through /ticket-process.
+        "Below is the raw output from planning Linear ticket ${ticket_id} via /ticket-plan.
 
 Write a concise per-phase summary of what actually happened. Use ONLY phases that ran. Format each on its own line:
 
-**Phase 0 — Worktree Setup:** <1 sentence>
-**Phase 1 — Fetch & Analyze:** <ticket type, title, any dependencies or blockers found>
-**Phase 2 — Claim:** <assigned + plan comment posted>
-**Phase 3 — Explore & Plan:** <root cause or design approach, key files identified>
-**Phase 4 — Implement:** <what changed and why — be specific about files/functions>
-**Phase 5a — Tests:** <suites run and pass/fail result>
-**Phase 5b — Visual Proof:** <screenshots or API responses captured>
-**Phase 6 — Commit & Push:** <branch pushed, Linear status updated to what>
+**Phase 1 — Fetch Ticket & Research:** <ticket title, research comment found or absent>
+**Phase 2 — Fill Research Gaps:** <sub-agents spawned, gaps filled>
+**Phase 3 — Resolve Key Decisions:** <decisions made, any human judgment comments posted>
+**Phase 4 — Write Implementation Plan:** <number of phases planned, key files identified, scope estimate>
+**Phase 5 — Post Plan & Transition:** <comment posted, status moved to Pending Plan Approval>
 
 Skip phases that did not run. Be factual. No filler.
 
@@ -279,8 +261,6 @@ $(cat)" \
 }
 
 # ── Interruptible sleep ───────────────────────────────────────────────────────
-# `wait` is guaranteed by POSIX to be interrupted by traps; foreground `sleep`
-# is not reliable in all bash versions.
 
 interruptible_sleep() {
     sleep "$1" &
@@ -290,7 +270,7 @@ interruptible_sleep() {
 # ── Linear query ──────────────────────────────────────────────────────────────
 
 fetch_pending_tickets() {
-    log INFO "Querying Linear for 'Todo' and 'Change Required' tickets..."
+    log INFO "Querying Linear for 'Research Approved' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -302,7 +282,7 @@ fetch_pending_tickets() {
     response=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${LINEAR_TEAM_KEY}\\\"}},state:{name:{in:[\\\"Todo\\\",\\\"Change Required\\\"]}}}) { nodes { identifier } } }\"}" \
+        -d '{"query":"{ issues(filter:{team:{key:{eq:\"GYL\"}},state:{name:{in:[\"Research Approved\"]}}}) { nodes { identifier } } }"}' \
         https://api.linear.app/graphql 2>/dev/null)
 
     if [[ $? -ne 0 || -z "$response" ]]; then
@@ -325,14 +305,13 @@ print('\n'.join(ids) if ids else 'NONE')
 }
 
 parse_ticket_ids() {
-    echo "$1" | grep -oE '[A-Z]+-[0-9]+' | sort -t- -k2 -n | uniq
+    echo "$1" | grep -oE 'GYL-[0-9]+' | sort -t- -k2 -n | uniq
 }
 
-is_processed()  { grep -qxF "$1" "$PROCESSED_FILE" 2>/dev/null; }
+is_processed()   { grep -qxF "$1" "$PROCESSED_FILE" 2>/dev/null; }
 mark_processed() { echo "$1" >> "$PROCESSED_FILE"; }
 
 # ── Linear status check ───────────────────────────────────────────────────────
-# Returns 0 (still actionable) or 1 (moved on / no longer Todo/Changes Required)
 
 ticket_still_actionable() {
     local ticket_id="$1"
@@ -356,7 +335,126 @@ nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
 print(nodes[0]['state']['name'] if nodes else '')
 " <<< "$response" 2>/dev/null)
 
-    [[ "$state_name" == "Todo" || "$state_name" == "Change Required" ]]
+    [[ "$state_name" == "Research Approved" ]]
+}
+
+# ── Stale-claim helpers ───────────────────────────────────────────────────────
+
+get_ticket_state() {
+    local ticket_id="$1"
+    [[ -z "${LINEAR_API_KEY:-}" ]] && echo "" && return
+    curl -sf \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { state { name } } } }\"}" \
+        https://api.linear.app/graphql 2>/dev/null \
+    | python3 -c "
+import json,sys
+d=json.loads(sys.stdin.read())
+n=d.get('data',{}).get('issues',{}).get('nodes',[])
+print(n[0]['state']['name'] if n else '')
+" 2>/dev/null || true
+}
+
+revert_ticket_status() {
+    local ticket_id="$1"
+    local target_state="$2"
+    [[ -z "${LINEAR_API_KEY:-}" ]] && return 1
+    local issue_resp uuid states_resp state_id
+    issue_resp=$(curl -sf \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { id } } }\"}" \
+        https://api.linear.app/graphql 2>/dev/null) || return 1
+    uuid=$(python3 -c "
+import json,sys
+d=json.loads(sys.stdin.read())
+n=d.get('data',{}).get('issues',{}).get('nodes',[])
+print(n[0]['id'] if n else '')
+" <<< "$issue_resp" 2>/dev/null)
+    [[ -z "$uuid" ]] && log WARN "revert: UUID not found for $ticket_id" && return 1
+    states_resp=$(curl -sf \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d '{"query":"{ teams(filter:{key:{eq:\"GYL\"}}) { nodes { states { nodes { id name } } } } }"}' \
+        https://api.linear.app/graphql 2>/dev/null) || return 1
+    state_id=$(python3 -c "
+import json,sys
+target=sys.argv[1]
+d=json.loads(sys.stdin.read())
+for team in d.get('data',{}).get('teams',{}).get('nodes',[]):
+    for s in team.get('states',{}).get('nodes',[]):
+        if s['name']==target:
+            print(s['id']); exit()
+" "$target_state" <<< "$states_resp" 2>/dev/null)
+    [[ -z "$state_id" ]] && log WARN "revert: state '$target_state' not found" && return 1
+    curl -sf \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"query\":\"mutation { issueUpdate(id: \\\"${uuid}\\\", input: { stateId: \\\"${state_id}\\\" }) { success } }\"}" \
+        https://api.linear.app/graphql >/dev/null 2>&1 || return 1
+    log OK "Reverted $ticket_id → '$target_state'"
+}
+
+STALE_THRESHOLD=1800   # 30 minutes — no stream output → revert
+STALE_WATCHDOG_PID=""
+
+start_stale_watchdog() {
+    local ticket_id="$1"
+    local hb_file="$2"
+    local revert_state="$3"
+    local pipe_pid="$4"
+    (
+        while [[ -f "$hb_file" ]]; do
+            sleep 60
+            [[ ! -f "$hb_file" ]] && exit 0
+            local mtime age
+            mtime=$(stat -f %m "$hb_file" 2>/dev/null) || exit 0
+            age=$(( $(date +%s) - mtime ))
+            if (( age > STALE_THRESHOLD )); then
+                printf "${YELLOW}[$(date '+%H:%M:%S')] ⚠  %s inactive %ds — reverting to '%s'${RESET}\n" \
+                    "$ticket_id" "$age" "$revert_state"
+                revert_ticket_status "$ticket_id" "$revert_state"
+                rm -f "$hb_file"
+                kill -- "-$(ps -o pgid= -p "$pipe_pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
+                    || kill "$pipe_pid" 2>/dev/null || true
+                exit 0
+            fi
+        done
+    ) &
+    STALE_WATCHDOG_PID=$!
+}
+
+stop_stale_watchdog() {
+    if [[ -n "${STALE_WATCHDOG_PID:-}" ]]; then
+        kill "$STALE_WATCHDOG_PID" 2>/dev/null || true
+        wait "$STALE_WATCHDOG_PID" 2>/dev/null || true
+        STALE_WATCHDOG_PID=""
+    fi
+}
+
+# Revert stale claims left by prior crashed agent instances
+revert_stale_claims() {
+    local hb_prefix="$1"    # e.g. "planning"
+    local lock_prefix="$2"  # e.g. "planning"
+    local stale_secs="$STALE_THRESHOLD"
+    local hb ticket_id revert_state mtime age
+    # nullglob: skip silently if no files match
+    for hb in /tmp/${hb_prefix}-heartbeat-*.txt; do
+        [[ -f "$hb" ]] || continue
+        ticket_id=$(basename "$hb" .txt | sed "s/${hb_prefix}-heartbeat-//")
+        revert_state=$(cat "$hb" 2>/dev/null) || continue
+        mtime=$(stat -f %m "$hb" 2>/dev/null) || continue
+        age=$(( $(date +%s) - mtime ))
+        if (( age > stale_secs )); then
+            log WARN "Stale claim: $ticket_id (${age}s old, revert→'$revert_state')"
+            revert_ticket_status "$ticket_id" "$revert_state"
+            rm -f "$hb"
+            rmdir "/tmp/${lock_prefix}-lock-${ticket_id}" 2>/dev/null || true
+        else
+            log INFO "Active claim file found: $ticket_id (${age}s, within threshold)"
+        fi
+    done
 }
 
 # ── Ticket processor ──────────────────────────────────────────────────────────
@@ -366,18 +464,16 @@ process_ticket() {
     local log_file="$LOG_DIR/${ticket_id}-$(date '+%Y%m%d-%H%M%S').log"
     local exit_code=0
 
-    # ── Per-ticket lock (parallel-safe, macOS/Linux) ─────────────────────────
-    # mkdir is atomic on APFS/HFS+/ext4 — if it succeeds we own the lock;
-    # if it fails the directory already exists (another agent holds it).
-    local lock_dir="/tmp/agent-lock-${ticket_id}"
+    local lock_dir="/tmp/planning-lock-${ticket_id}"
     if ! mkdir "$lock_dir" 2>/dev/null; then
         log INFO "  $ticket_id is locked by another local agent — skipping"
         return
     fi
-    # Release the lock on function exit (normal return, error, or signal).
-    trap "rmdir '$lock_dir' 2>/dev/null || true" RETURN
+    local HB_FILE="/tmp/planning-heartbeat-${ticket_id}.txt"
+    echo "Research Approved" > "$HB_FILE"
+    trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}'" RETURN
 
-    divider "═" "Processing: $ticket_id"
+    divider "═" "Planning: $ticket_id"
     log WORK "Ticket  : $ticket_id"
     log WORK "Log     : $log_file"
     log WORK "Started : $(date '+%Y-%m-%d %H:%M:%S')"
@@ -386,22 +482,18 @@ process_ticket() {
 
     start_heartbeat "$ticket_id"
 
-    # ── Live streaming pipeline ───────────────────────────────────────────────
-    # Run in background so the INT trap can kill it immediately on Ctrl-C.
-    # tee saves raw stream-json; processor formats output and emits Phase banners.
-    # Watchdog: kill the pipeline group after TICKET_TIMEOUT seconds without
-    # wrapping claude itself (timeout(1) can silently suppress claude output).
     (
         claude --dangerously-skip-permissions \
                --no-session-persistence \
-               -p "/ticket-process $ticket_id" \
+               -p "/ticket-plan $ticket_id" \
                --output-format stream-json \
                --include-partial-messages \
                2>&1
-    ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" &
+    ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
     PIPELINE_PID=$!
 
-    # Watchdog kills the pipeline group after TICKET_TIMEOUT seconds
+    start_stale_watchdog "$ticket_id" "$HB_FILE" "Research Approved" "$PIPELINE_PID"
+
     ( sleep "$TICKET_TIMEOUT" && \
       kill -- "-$(ps -o pgid= -p "$PIPELINE_PID" 2>/dev/null | tr -d ' ')" 2>/dev/null ) &
     WATCHDOG_PID=$!
@@ -412,21 +504,32 @@ process_ticket() {
     kill "$WATCHDOG_PID" 2>/dev/null || true
     wait "$WATCHDOG_PID" 2>/dev/null || true
 
+    stop_stale_watchdog
+    rm -f "$HB_FILE"
+
+    # Post-exit revert: if ticket still in claimed state, revert it
+    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
+        local final_state
+        final_state=$(get_ticket_state "$ticket_id") || final_state=""
+        if [[ "$final_state" == "Planning" ]]; then
+            log WARN "$ticket_id still in 'Planning' after pipeline exit — reverting to 'Research Approved'"
+            revert_ticket_status "$ticket_id" "Research Approved"
+        fi
+    fi
+
     stop_heartbeat
 
     echo ""
     if [[ $exit_code -eq 0 ]]; then
-        log OK  "✓ Completed : $ticket_id  ($(date '+%H:%M:%S'))"
+        log OK  "✓ Plan complete : $ticket_id  ($(date '+%H:%M:%S'))"
     else
         log WARN "⚠  Exit code ${exit_code} for $ticket_id"
     fi
 
-    # ── Per-phase summary ─────────────────────────────────────────────────────
     summarize_phases "$ticket_id" "$log_file"
 
-    # ── Conditional cache: only skip on future polls if Linear status moved on ─
     if ticket_still_actionable "$ticket_id"; then
-        log WARN "  $ticket_id still in Todo/Change Required — will retry next poll (not cached)"
+        log WARN "  $ticket_id still in Research Approved — will retry next poll (not cached)"
     else
         mark_processed "$ticket_id"
         log INFO "  $ticket_id status advanced — cached to skip future polls"
@@ -445,22 +548,20 @@ SHUTTING_DOWN=false
 on_interrupt() {
     $SHUTTING_DOWN && return
     SHUTTING_DOWN=true
-    trap '' EXIT INT TERM          # prevent re-entry
+    trap '' EXIT INT TERM
     echo ""
     log WARN "Interrupted — shutting down..."
     stop_heartbeat
-    # Kill the pipeline (python3 last in pipe = $PIPELINE_PID, its siblings tee
-    # and the claude subshell are in the same process group — kill them all)
+    stop_stale_watchdog
     if [[ -n "$PIPELINE_PID" ]]; then
         kill -- "-$(ps -o pgid= -p "$PIPELINE_PID" 2>/dev/null | tr -d ' ')" 2>/dev/null \
             || kill "$PIPELINE_PID" 2>/dev/null || true
     fi
-    # Sweep any remaining children (heartbeat, stray subshells)
     pkill -P $$ -TERM 2>/dev/null || true
     sleep 0.3
     pkill -P $$ -KILL 2>/dev/null || true
     rm -f "$PROCESSOR"
-    log INFO "Agent stopped (PID $$) — $(date '+%Y-%m-%d %H:%M:%S')"
+    log INFO "Planning agent stopped (PID $$) — $(date '+%Y-%m-%d %H:%M:%S')"
     log INFO "Session log : $LOG_DIR/agent.log"
     exit 130
 }
@@ -477,8 +578,8 @@ trap on_exit EXIT
 
 main() {
     divider "═"
-    log INFO "  Autonomous Linear Ticket Agent"
-    log INFO "  Team key       : ${LINEAR_TEAM_KEY}"
+    log INFO "  Autonomous Planning Agent"
+    log INFO "  Picks up: Research Approved → Planning → Pending Plan Approval"
     log INFO "  Poll interval  : ${POLL_INTERVAL}s"
     log INFO "  Heartbeat      : ${HEARTBEAT_INTERVAL}s"
     log INFO "  Session logs   : $LOG_DIR/"
@@ -489,6 +590,7 @@ main() {
     local cycle=0
 
     while true; do
+        revert_stale_claims "planning" "planning"
         cycle=$((cycle + 1))
         log INFO "Poll #${cycle} — $(date '+%Y-%m-%d %H:%M:%S')"
 
@@ -496,7 +598,7 @@ main() {
         local ticket_ids; ticket_ids=$(parse_ticket_ids "$raw") || true
 
         if [[ -z "$ticket_ids" ]]; then
-            log INFO "No pending tickets. Sleeping ${POLL_INTERVAL}s..."
+            log INFO "No Research Approved tickets. Sleeping ${POLL_INTERVAL}s..."
             interruptible_sleep "$POLL_INTERVAL"
             continue
         fi

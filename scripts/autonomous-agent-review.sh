@@ -31,12 +31,6 @@ if [[ -z "${LINEAR_API_KEY:-}" && -f "$REPO_ROOT/.auto-claude/.env" ]]; then
     LINEAR_API_KEY="$(grep -E '^LINEAR_API_KEY=' "$REPO_ROOT/.auto-claude/.env" | cut -d= -f2 | cut -d' ' -f1)"
 fi
 
-# Load LINEAR_TEAM_KEY from .auto-claude/.env if not already set
-if [[ -z "${LINEAR_TEAM_KEY:-}" && -f "$REPO_ROOT/.auto-claude/.env" ]]; then
-    LINEAR_TEAM_KEY="$(grep -E '^LINEAR_TEAM_KEY=' "$REPO_ROOT/.auto-claude/.env" | cut -d= -f2 | cut -d' ' -f1)"
-fi
-LINEAR_TEAM_KEY="${LINEAR_TEAM_KEY:-ENG}"  # fallback default
-
 POLL_INTERVAL=60
 HEARTBEAT_INTERVAL=30
 TICKET_TIMEOUT=1800   # max seconds for a single ticket review (default 30 min)
@@ -84,7 +78,7 @@ Usage: python3 <script> <ticket_id>
 """
 import sys, json, re
 
-ticket_id = sys.argv[1] if len(sys.argv) > 1 else "TICKET-?"
+ticket_id = sys.argv[1] if len(sys.argv) > 1 else "GYL-?"
 
 R  = '\033[0m'
 BL = '\033[0;34m'   # blue
@@ -348,7 +342,7 @@ fetch_review_tickets() {
     response=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${LINEAR_TEAM_KEY}\\\"}},state:{name:{eq:\\\"In Review\\\"}}}) { nodes { identifier } } }\"}" \
+        -d '{"query":"{ issues(filter:{team:{key:{eq:\"GYL\"}},state:{name:{eq:\"In Review\"}}}) { nodes { identifier } } }"}' \
         https://api.linear.app/graphql 2>/dev/null)
 
     if [[ $? -ne 0 || -z "$response" ]]; then
@@ -371,7 +365,7 @@ print('\n'.join(ids) if ids else 'NONE')
 }
 
 parse_ticket_ids() {
-    echo "$1" | grep -oE '[A-Z]+-[0-9]+' | sort -t- -k2 -n | uniq
+    echo "$1" | grep -oE 'GYL-[0-9]+' | sort -t- -k2 -n | uniq
 }
 
 is_processed()   { grep -qxF "$1" "$PROCESSED_FILE" 2>/dev/null; }
@@ -403,6 +397,79 @@ print(nodes[0]['state']['name'] if nodes else '')
 " <<< "$response" 2>/dev/null)
 
     [[ "$state_name" == "In Review" ]]
+}
+
+# ── Post-pass build check ─────────────────────────────────────────────────────
+# Returns 0 (build ok or no Rust changes) or 1 (build failed).
+# Runs cargo build --profile dev-fast --workspace from the ticket's worktree;
+# falls back to creating a temporary worktree if the review one is gone.
+
+run_build_check() {
+    local ticket_id="$1"
+    local log_file="$2"
+
+    # Resolve branch name
+    local branch=""
+    if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/feat/${ticket_id}"; then
+        branch="feat/${ticket_id}"
+    elif git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/fix/${ticket_id}"; then
+        branch="fix/${ticket_id}"
+    else
+        branch=$(git -C "$REPO_ROOT" branch -r \
+            | grep -E "(feat|fix)/${ticket_id}$" | head -1 \
+            | sed 's|origin/||' | tr -d ' ')
+    fi
+
+    if [[ -z "$branch" ]]; then
+        log WARN "Build check: branch not found for ${ticket_id} — skipping"
+        return 0
+    fi
+
+    # Count Rust source / manifest changes introduced by the branch
+    local rust_changes
+    rust_changes=$(git -C "$REPO_ROOT" diff --name-only "develop...${branch}" 2>/dev/null \
+        | grep -cE '\.(rs|toml)$' || echo 0)
+
+    if [[ "$rust_changes" -eq 0 ]]; then
+        log INFO "Build check: no Rust changes in ${branch} — skipping"
+        return 0
+    fi
+
+    log INFO "Build check: ${rust_changes} Rust file(s) changed in ${branch} — running cargo build..."
+
+    # Prefer the existing review worktree; create a temp one if needed
+    local build_dir="${REPO_ROOT}/../worktrees/${branch}"
+    local tmp_wt=""
+    if [[ ! -d "$build_dir" ]]; then
+        tmp_wt="${REPO_ROOT}/../worktrees-buildcheck/${ticket_id}"
+        mkdir -p "$(dirname "$tmp_wt")"
+        if git -C "$REPO_ROOT" worktree add "$tmp_wt" "$branch" 2>/dev/null; then
+            build_dir="$tmp_wt"
+        else
+            log WARN "Build check: cannot create worktree — skipping"
+            return 0
+        fi
+    fi
+
+    local build_ok=0
+    (
+        cd "$build_dir"
+        cargo build --profile dev-fast --workspace 2>&1
+    ) | tee -a "$log_file" | tail -20 || build_ok=1
+
+    # Clean up temp worktree
+    if [[ -n "$tmp_wt" ]]; then
+        git -C "$REPO_ROOT" worktree remove --force "$tmp_wt" 2>/dev/null || true
+        git -C "$REPO_ROOT" worktree prune 2>/dev/null || true
+    fi
+
+    if [[ $build_ok -ne 0 ]]; then
+        log ERROR "Build check FAILED for ${ticket_id}"
+        return 1
+    fi
+
+    log OK "Build check passed for ${ticket_id}"
+    return 0
 }
 
 # ── Ticket reviewer ───────────────────────────────────────────────────────────
@@ -491,15 +558,69 @@ PYEOF
         verdict="FAIL"
     fi
 
+    # ── Post-pass build check ─────────────────────────────────────────────────
+    # If the review passed but the branch has Rust changes, build the workspace
+    # now to catch compile errors before the ticket reaches a human reviewer.
+    if [[ "$verdict" == "PASS" ]]; then
+        if ! run_build_check "$ticket_id" "$log_file"; then
+            log ERROR "Build errors detected — overriding PASS to FAIL for $ticket_id"
+            verdict="BUILD_FAIL"
+
+            # Move Linear ticket back to Changes Required and leave a comment
+            if [[ -n "${LINEAR_API_KEY:-}" ]]; then
+                local changes_req_id
+                changes_req_id=$(curl -sf \
+                    -H "Authorization: ${LINEAR_API_KEY}" \
+                    -H "Content-Type: application/json" \
+                    -d '{"query":"{ workflowStates(filter:{team:{key:{eq:\"GYL\"}},name:{eq:\"Changes Required\"}}) { nodes { id } } }"}' \
+                    https://api.linear.app/graphql 2>/dev/null \
+                    | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data']['workflowStates']['nodes'][0]['id'])" 2>/dev/null || true)
+
+                local ticket_gql_id
+                ticket_gql_id=$(curl -sf \
+                    -H "Authorization: ${LINEAR_API_KEY}" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { id } } }\"}" \
+                    https://api.linear.app/graphql 2>/dev/null \
+                    | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data']['issues']['nodes'][0]['id'])" 2>/dev/null || true)
+
+                if [[ -n "$changes_req_id" && -n "$ticket_gql_id" ]]; then
+                    curl -sf \
+                        -H "Authorization: ${LINEAR_API_KEY}" \
+                        -H "Content-Type: application/json" \
+                        -d "{\"query\":\"mutation { issueUpdate(id:\\\"${ticket_gql_id}\\\", input:{stateId:\\\"${changes_req_id}\\\"}) { success } }\"}" \
+                        https://api.linear.app/graphql > /dev/null 2>&1 || true
+
+                    curl -sf \
+                        -H "Authorization: ${LINEAR_API_KEY}" \
+                        -H "Content-Type: application/json" \
+                        -d "{\"query\":\"mutation { commentCreate(input:{issueId:\\\"${ticket_gql_id}\\\", body:\\\"## Build Check Failed ❌\\\\n\\\\nThe autonomous review agent detected compile errors after the code review passed.\\\\n\\\\n**Action required:** Fix the build errors then re-submit for review.\\\\n\\\\nCheck the review log for the full \`cargo build\` output.\\\"}) { success } }\"}" \
+                        https://api.linear.app/graphql > /dev/null 2>&1 || true
+
+                    log INFO "Linear ticket $ticket_id moved back to Changes Required"
+                fi
+            fi
+        fi
+    fi
+
     case "$verdict" in
         PASS)
             echo ""
             echo -e "${GREEN}${BOLD}  ╔══════════════════════════════════════════════════════╗${RESET}"
             echo -e "${GREEN}${BOLD}  ║  ✅  PASS — ticket moved to Human Review             ║${RESET}"
-            echo -e "${GREEN}${BOLD}  ║  Verify the feature, then run /ticket-approve        ║${RESET}"
+            echo -e "${GREEN}${BOLD}  ║  Verify at http://localhost:8105 then /ticket-approve ║${RESET}"
             echo -e "${GREEN}${BOLD}  ╚══════════════════════════════════════════════════════╝${RESET}"
             echo ""
-            log PASS "Human verification required for $ticket_id — check Linear"
+            log PASS "Human verification required for $ticket_id — check Linear + http://localhost:8105"
+            ;;
+        BUILD_FAIL)
+            echo ""
+            echo -e "${RED}${BOLD}  ╔══════════════════════════════════════════════════════╗${RESET}"
+            echo -e "${RED}${BOLD}  ║  🔨  BUILD FAIL — compile errors found after review  ║${RESET}"
+            echo -e "${RED}${BOLD}  ║  Ticket moved back to Changes Required               ║${RESET}"
+            echo -e "${RED}${BOLD}  ╚══════════════════════════════════════════════════════╝${RESET}"
+            echo ""
+            log FAIL "Build errors for $ticket_id — moved to Changes Required"
             ;;
         FAIL)
             echo ""
@@ -568,7 +689,6 @@ trap on_exit EXIT
 main() {
     divider "═"
     log INFO "  Autonomous Linear Review Agent"
-    log INFO "  Team key        : ${LINEAR_TEAM_KEY}"
     log INFO "  Watching status : In Review"
     log INFO "  Poll interval   : ${POLL_INTERVAL}s"
     log INFO "  Heartbeat       : ${HEARTBEAT_INTERVAL}s"

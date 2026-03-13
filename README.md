@@ -5,12 +5,18 @@ A self-contained template that wires Claude CLI to Linear for end-to-end autonom
 ## The Pipeline
 
 ```
-Todo / Changes Required  →  autonomous-agent.sh        →  /ticket-process  →  In Review
-In Review               →  autonomous-review-agent.sh  →  /ticket-review   →  Human Review / Changes Required
-Merging                 →  autonomous-approve-agent.sh →  /ticket-approve  →  Done
+Todo                      →  autonomous-agent-research.sh  →  /ticket-research  →  Pending Research Approval
+                                                                                           ↓ (human approves → Planning)
+Planning                  →  autonomous-agent-plan.sh  →  /ticket-plan      →  Pending Plan Approval
+                                                                                           ↓ (human approves → Plan Approved)
+Plan Approved / Changes Required  →  autonomous-agent-process.sh   →  /ticket-process   →  In Review
+In Review                 →  autonomous-agent-review.sh    →  /ticket-review    →  Human Review / Changes Required
+Merging                   →  autonomous-agent-approve.sh   →  /ticket-approve   →  Done
 ```
 
-Each script runs independently and polls Linear for tickets in its target state. All three can run simultaneously in separate terminals.
+Each script runs independently and polls Linear for tickets in its target state. All five can run simultaneously in separate terminals.
+
+The research and planning stages each include a human checkpoint — after the agent posts its output, a human reviews and manually advances the ticket to the next state before the next agent picks it up.
 
 ## Prerequisites
 
@@ -25,13 +31,20 @@ The following workflow states must exist in your Linear team. Create them under 
 
 | State | Used by |
 |---|---|
-| **Todo** | autonomous-agent.sh picks up tickets from here |
-| **In Progress** | agent sets this while implementing |
-| **In Review** | agent sets this after pushing; review-agent picks up from here |
+| **Todo** | research-agent picks up tickets from here |
+| **Research** | research-agent sets this while exploring |
+| **Pending Research Approval** | research-agent sets this when done; human reviews and moves to Planning |
+| **Planning** | planning-agent picks up from here |
+| **Pending Plan Approval** | planning-agent sets this when done; human reviews and moves to Plan Approved |
+| **Plan Approved** | coding-agent picks up from here |
+| **In Progress** | coding-agent sets this while implementing |
+| **In Review** | coding-agent sets this after pushing; review-agent picks up from here |
 | **Human Review** | review-agent sets this on PASS; human verifies then moves to Merging |
 | **Merging** | human sets this to trigger approve-agent |
 | **Done** | approve-agent sets this after merge |
-| **Changes Required** | review-agent sets this on FAIL; agent picks up again |
+| **Changes Required** | review-agent sets this on FAIL; coding-agent picks up again |
+
+If you want to skip the research/planning stages and use only the original three agents, simply move tickets directly to **Plan Approved** or **In Progress** and only run `autonomous-agent-process.sh`, `autonomous-agent-review.sh`, and `autonomous-agent-approve.sh`.
 
 ## Quick Start
 
@@ -46,21 +59,23 @@ The setup script writes your Linear API key and team key to `.auto-claude/.env`,
 Once configured, run each agent in a separate terminal from your project root:
 
 ```bash
-./scripts/autonomous-agent.sh
-./scripts/autonomous-review-agent.sh
-./scripts/autonomous-approve-agent.sh
+./scripts/autonomous-agent-research.sh   # researches Todo tickets
+./scripts/autonomous-agent-plan.sh   # plans Pending Research Approval → Planning tickets
+./scripts/autonomous-agent-process.sh            # implements Plan Approved + Changes Required tickets
+./scripts/autonomous-agent-review.sh     # reviews In Review tickets
+./scripts/autonomous-agent-approve.sh    # merges Merging tickets
 ```
 
 Each script accepts `--poll-interval <seconds>`, `--once` (process one ticket and exit), and `--reset` (clear the session cache).
 
 ## Running in Parallel
 
-Multiple instances of each script can run concurrently against the same Linear team — per-ticket `mkdir` locks prevent two agents from processing the same ticket simultaneously. The lock directory name includes the ticket ID (`/tmp/agent-lock-TICKET-XX`).
+Multiple instances of each script can run concurrently against the same Linear team — per-ticket `mkdir` locks prevent two agents from processing the same ticket simultaneously.
 
-If an agent crashes mid-ticket, the stale lock directory must be removed manually before that ticket will be picked up again. Replace `TEAMKEY` with your team key:
+If an agent crashes mid-ticket, the stale lock directory must be removed manually before that ticket will be picked up again:
 
 ```bash
-rm -rf /tmp/agent-lock-TEAMKEY-* /tmp/review-lock-TEAMKEY-* /tmp/approve-lock-TEAMKEY-*
+rm -rf /tmp/research-lock-* /tmp/planning-lock-* /tmp/agent-lock-* /tmp/review-lock-* /tmp/approve-lock-*
 ```
 
 ## CLAUDE.md
@@ -76,6 +91,30 @@ The agents run Claude CLI against your repo. Claude automatically loads your pro
 A well-written `CLAUDE.md` dramatically improves implementation quality — the agent uses it to make technology-appropriate decisions without hallucinating your stack.
 
 ## What Each Command Does
+
+### `/ticket-research <TICKET-ID>`
+
+Researches a ticket by exploring the codebase and posting findings as a ticket comment:
+
+1. Fetches ticket details and sets status to `Research`
+2. Decomposes the ticket into research areas
+3. Spawns parallel `Explore` agents — one per area (scope, patterns, tests, schema)
+4. Synthesizes findings into a structured research document with file:line references
+5. Posts the document as a ticket comment and moves to `Pending Research Approval`
+
+No code changes are made — this is a read-only codebase pass.
+
+### `/ticket-plan <TICKET-ID>`
+
+Creates a phased implementation plan from the ticket and its research comment:
+
+1. Fetches ticket details and extracts the research comment (if present)
+2. Spawns `Explore` agents to fill any remaining gaps
+3. Resolves architectural decisions; posts a comment if human judgment is needed
+4. Writes a phased plan — each phase has explicit file changes and success criteria
+5. Posts the plan as a ticket comment and moves to `Pending Plan Approval`
+
+No code changes are made — this is a planning-only pass.
 
 ### `/ticket-process <TICKET-ID>`
 
