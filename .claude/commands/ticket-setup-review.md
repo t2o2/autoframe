@@ -251,6 +251,7 @@ Use the appropriate tools based on what's needed. **Not every ticket needs a bro
 
 ```
 mcp__chrome-devtools__new_page
+mcp__chrome-devtools__resize_page → width: 1280, height: 800  (MUST happen before navigate)
 mcp__chrome-devtools__navigate_page → [url]
 mcp__chrome-devtools__wait_for → [selector or text]
 mcp__chrome-devtools__fill → [input selector], [value]

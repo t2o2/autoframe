@@ -258,8 +258,9 @@ mkdir -p "${PROOF_DIR}"
 Ensure the frontend and its backing services are running (start via `just up` or `just dev` + `just dev-frontend` if not already). Then use Chrome DevTools MCP:
 
 1. `mcp__chrome-devtools__new_page` — open a fresh tab
-2. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
-3. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
+2. `mcp__chrome-devtools__resize_page` → `width: 1280, height: 800` — **MUST happen before navigate** so the page renders at this viewport from the start (doing it after causes blank-fill bugs)
+3. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
+4. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
 
 Walk through **every acceptance criterion** that has a visible outcome. For each step:
 
