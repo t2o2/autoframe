@@ -21,10 +21,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$SCRIPT_DIR/autonomous-planning-logs"
 PROCESSED_FILE="/tmp/autonomous-planning-processed.txt"
 
-# Load LINEAR_API_KEY from .auto-claude/.env if not already set
+# Load LINEAR_API_KEY from .env if not already set
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-if [[ -z "${LINEAR_API_KEY:-}" && -f "$REPO_ROOT/.auto-claude/.env" ]]; then
-    LINEAR_API_KEY="$(grep -E '^LINEAR_API_KEY=' "$REPO_ROOT/.auto-claude/.env" | cut -d= -f2 | cut -d' ' -f1)"
+if [[ -z "${LINEAR_API_KEY:-}" && -f "$REPO_ROOT/.env" ]]; then
+    LINEAR_API_KEY="$(grep -E '^LINEAR_API_KEY=' "$REPO_ROOT/.env" | cut -d= -f2 | cut -d' ' -f1)"
 fi
 
 POLL_INTERVAL=60
@@ -435,8 +435,8 @@ stop_stale_watchdog() {
 
 # Revert stale claims left by prior crashed agent instances
 revert_stale_claims() {
-    local hb_prefix="$1"    # e.g. "planning"
-    local lock_prefix="$2"  # e.g. "planning"
+    local hb_prefix="$1"    # e.g. "plan"
+    local lock_prefix="$2"  # e.g. "plan"
     local stale_secs="$STALE_THRESHOLD"
     local hb ticket_id revert_state mtime age
     # nullglob: skip silently if no files match
@@ -464,12 +464,12 @@ process_ticket() {
     local log_file="$LOG_DIR/${ticket_id}-$(date '+%Y%m%d-%H%M%S').log"
     local exit_code=0
 
-    local lock_dir="/tmp/planning-lock-${ticket_id}"
+    local lock_dir="/tmp/plan-lock-${ticket_id}"
     if ! mkdir "$lock_dir" 2>/dev/null; then
         log INFO "  $ticket_id is locked by another local agent — skipping"
         return
     fi
-    local HB_FILE="/tmp/planning-heartbeat-${ticket_id}.txt"
+    local HB_FILE="/tmp/plan-heartbeat-${ticket_id}.txt"
     echo "Research Approved" > "$HB_FILE"
     trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}'" RETURN
 
@@ -590,7 +590,7 @@ main() {
     local cycle=0
 
     while true; do
-        revert_stale_claims "planning" "planning"
+        revert_stale_claims "plan" "plan"
         cycle=$((cycle + 1))
         log INFO "Poll #${cycle} — $(date '+%Y-%m-%d %H:%M:%S')"
 

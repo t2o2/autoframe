@@ -27,7 +27,7 @@ TIMEOUT=3600   # 1 hour
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="$REPO_ROOT/.auto-claude/.env"
+ENV_FILE="$REPO_ROOT/.env"
 
 if [[ -f "$ENV_FILE" ]]; then
     TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-$(grep -E '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]')}"
@@ -35,7 +35,7 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
-    echo "ERROR: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in .auto-claude/.env" >&2
+    echo "ERROR: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in .env" >&2
     exit 2
 fi
 

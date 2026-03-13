@@ -64,13 +64,13 @@ echo -n "Enter your Linear API key: "
 read -rs LINEAR_KEY
 echo ""
 
-# Write .auto-claude/.env
+# Write .env
 cat > "$ENV_FILE" << EOF
 LINEAR_API_KEY=${LINEAR_KEY}
 LINEAR_TEAM_KEY=${TEAM_KEY}
 EOF
 
-ok "Wrote config to .auto-claude/.env"
+ok "Wrote config to .env"
 
 # ── Download scripts to target repo ───────────────────────────────────────────
 
@@ -126,12 +126,12 @@ if [[ -n "$TARGET_REPO" ]]; then
         done
 
         # Write .env config if .auto-claude doesn't exist yet
-        if [[ ! -f "$TARGET_REPO/.auto-claude/.env" ]]; then
+        if [[ ! -f "$TARGET_REPO/.env" ]]; then
             mkdir -p "$TARGET_REPO/.auto-claude"
-            cp "$ENV_FILE" "$TARGET_REPO/.auto-claude/.env"
-            ok "Wrote .auto-claude/.env to $(basename "$TARGET_REPO")"
+            cp "$ENV_FILE" "$TARGET_REPO/.env"
+            ok "Wrote .env to $(basename "$TARGET_REPO")"
         else
-            info "Skipped .auto-claude/.env (already exists)"
+            info "Skipped .env (already exists)"
         fi
 
         ok "Downloaded scripts and commands to: $TARGET_REPO"
@@ -145,7 +145,7 @@ echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "${GREEN}${BOLD}Setup complete!${RESET}"
 echo ""
 echo "Team key : ${TEAM_KEY}"
-echo "Config   : .auto-claude/.env"
+echo "Config   : .env"
 echo ""
 echo -e "${BOLD}Next steps:${RESET}"
 echo ""
@@ -165,7 +165,7 @@ echo "  3. Add a CLAUDE.md to your project root describing your stack and conven
 echo "     The agents load it as context for every ticket."
 echo ""
 echo -e "${BOLD}To stale-lock cleanup (if agents crash mid-ticket):${RESET}"
-echo "  rm -rf /tmp/research-lock-* /tmp/planning-lock-* /tmp/agent-lock-* /tmp/review-lock-* /tmp/approve-lock-*"
+echo "  rm -rf /tmp/research-lock-* /tmp/plan-lock-* /tmp/process-lock-* /tmp/review-lock-* /tmp/approve-lock-*"
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""

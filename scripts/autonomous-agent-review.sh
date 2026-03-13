@@ -25,10 +25,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$SCRIPT_DIR/autonomous-review-logs"
 PROCESSED_FILE="/tmp/autonomous-review-processed.txt"
 
-# Load LINEAR_API_KEY from .auto-claude/.env if not already set
+# Load LINEAR_API_KEY from .env if not already set
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-if [[ -z "${LINEAR_API_KEY:-}" && -f "$REPO_ROOT/.auto-claude/.env" ]]; then
-    LINEAR_API_KEY="$(grep -E '^LINEAR_API_KEY=' "$REPO_ROOT/.auto-claude/.env" | cut -d= -f2 | cut -d' ' -f1)"
+if [[ -z "${LINEAR_API_KEY:-}" && -f "$REPO_ROOT/.env" ]]; then
+    LINEAR_API_KEY="$(grep -E '^LINEAR_API_KEY=' "$REPO_ROOT/.env" | cut -d= -f2 | cut -d' ' -f1)"
 fi
 
 POLL_INTERVAL=60

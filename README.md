@@ -54,7 +54,7 @@ Run this from inside your existing repo:
 bash <(curl -fsSL https://raw.githubusercontent.com/t2o2/autoframe/master/setup.sh)
 ```
 
-The setup script writes your Linear API key and team key to `.auto-claude/.env`, then optionally copies the scripts and Claude commands into an existing project.
+The setup script writes your Linear API key and team key to `.env`, then optionally copies the scripts and Claude commands into an existing project.
 
 Once configured, run each agent in a separate terminal from your project root:
 
@@ -75,7 +75,7 @@ Multiple instances of each script can run concurrently against the same Linear t
 If an agent crashes mid-ticket, the stale lock directory must be removed manually before that ticket will be picked up again:
 
 ```bash
-rm -rf /tmp/research-lock-* /tmp/planning-lock-* /tmp/agent-lock-* /tmp/review-lock-* /tmp/approve-lock-*
+rm -rf /tmp/research-lock-* /tmp/plan-lock-* /tmp/process-lock-* /tmp/review-lock-* /tmp/approve-lock-*
 ```
 
 ## CLAUDE.md
@@ -170,12 +170,12 @@ The `wtp` helper manages this. If not installed, the scripts fall back to `git w
 
 | Variable | Source | Description |
 |---|---|---|
-| `LINEAR_API_KEY` | `.auto-claude/.env` or shell env | Linear personal API key |
-| `LINEAR_TEAM_KEY` | `.auto-claude/.env` or shell env | Linear team identifier (e.g. `ENG`) |
-| `TELEGRAM_BOT_TOKEN` | `.auto-claude/.env` or shell env | Telegram bot token (from `@BotFather`) |
-| `TELEGRAM_CHAT_ID` | `.auto-claude/.env` or shell env | Your Telegram chat or user ID |
+| `LINEAR_API_KEY` | `.env` or shell env | Linear personal API key |
+| `LINEAR_TEAM_KEY` | `.env` or shell env | Linear team identifier (e.g. `ENG`) |
+| `TELEGRAM_BOT_TOKEN` | `.env` or shell env | Telegram bot token (from `@BotFather`) |
+| `TELEGRAM_CHAT_ID` | `.env` or shell env | Your Telegram chat or user ID |
 
-All variables can be set in the environment before running the scripts, or stored in `.auto-claude/.env` (created by `setup.sh`).
+All variables can be set in the environment before running the scripts, or stored in `.env` (created by `setup.sh`).
 
 ### Telegram setup (optional — enables human-in-the-loop input)
 
@@ -187,7 +187,7 @@ When an agent needs a decision it can't resolve from code, it sends the question
    curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
    # Look for "chat":{"id": ...} in the result
    ```
-3. Add to `.auto-claude/.env`:
+3. Add to `.env`:
    ```
    TELEGRAM_BOT_TOKEN=<token>
    TELEGRAM_CHAT_ID=<chat_id>
