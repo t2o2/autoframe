@@ -76,9 +76,10 @@ Prints formatted output with real-time Phase transition banners and surfaces
 the PASS/FAIL verdict from /ticket-review output.
 Usage: python3 <script> <ticket_id>
 """
-import sys, json, re
+import sys, json, re, os
 
 ticket_id = sys.argv[1] if len(sys.argv) > 1 else "GYL-?"
+heartbeat_file = sys.argv[2] if len(sys.argv) > 2 else None
 
 R  = '\033[0m'
 BL = '\033[0;34m'   # blue
@@ -109,6 +110,10 @@ for raw in sys.stdin:
         event = json.loads(raw)
     except Exception:
         continue
+
+    if heartbeat_file:
+        try: os.utime(heartbeat_file, None)
+        except OSError: pass
 
     etype = event.get('type', '')
 
@@ -243,6 +248,123 @@ stop_heartbeat() {
         wait "$HEARTBEAT_PID" 2>/dev/null || true
         HEARTBEAT_PID=""
     fi
+}
+
+# ── Stale-claim helpers ───────────────────────────────────────────────────────
+
+STALE_THRESHOLD=1800   # 30 minutes — no stream output → revert
+STALE_WATCHDOG_PID=""
+
+get_ticket_state() {
+    local ticket_id="$1"
+    [[ -z "${LINEAR_API_KEY:-}" ]] && echo "" && return
+    curl -sf \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { state { name } } } }\"}" \
+        https://api.linear.app/graphql 2>/dev/null \
+    | python3 -c "
+import json,sys
+d=json.loads(sys.stdin.read())
+n=d.get('data',{}).get('issues',{}).get('nodes',[])
+print(n[0]['state']['name'] if n else '')
+" 2>/dev/null || true
+}
+
+revert_ticket_status() {
+    local ticket_id="$1"
+    local target_state="$2"
+    [[ -z "${LINEAR_API_KEY:-}" ]] && return 1
+    local issue_resp uuid states_resp state_id
+    issue_resp=$(curl -sf \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { id } } }\"}" \
+        https://api.linear.app/graphql 2>/dev/null) || return 1
+    uuid=$(python3 -c "
+import json,sys
+d=json.loads(sys.stdin.read())
+n=d.get('data',{}).get('issues',{}).get('nodes',[])
+print(n[0]['id'] if n else '')
+" <<< "$issue_resp" 2>/dev/null)
+    [[ -z "$uuid" ]] && log WARN "revert: UUID not found for $ticket_id" && return 1
+    states_resp=$(curl -sf \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d '{"query":"{ teams(filter:{key:{eq:\"GYL\"}}) { nodes { states { nodes { id name } } } } }"}' \
+        https://api.linear.app/graphql 2>/dev/null) || return 1
+    state_id=$(python3 -c "
+import json,sys
+target=sys.argv[1]
+d=json.loads(sys.stdin.read())
+for team in d.get('data',{}).get('teams',{}).get('nodes',[]):
+    for s in team.get('states',{}).get('nodes',[]):
+        if s['name']==target:
+            print(s['id']); exit()
+" "$target_state" <<< "$states_resp" 2>/dev/null)
+    [[ -z "$state_id" ]] && log WARN "revert: state '$target_state' not found" && return 1
+    curl -sf \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"query\":\"mutation { issueUpdate(id: \\\"${uuid}\\\", input: { stateId: \\\"${state_id}\\\" }) { success } }\"}" \
+        https://api.linear.app/graphql >/dev/null 2>&1 || return 1
+    log OK "Reverted $ticket_id → '$target_state'"
+}
+
+start_stale_watchdog() {
+    local ticket_id="$1"
+    local hb_file="$2"
+    local revert_state="$3"
+    local pipe_pid="$4"
+    (
+        while [[ -f "$hb_file" ]]; do
+            sleep 60
+            [[ ! -f "$hb_file" ]] && exit 0
+            local mtime age
+            mtime=$(stat -f %m "$hb_file" 2>/dev/null) || exit 0
+            age=$(( $(date +%s) - mtime ))
+            if (( age > STALE_THRESHOLD )); then
+                printf "${YELLOW}[$(date '+%H:%M:%S')] ⚠  %s inactive %ds — reverting to '%s'${RESET}\n" \
+                    "$ticket_id" "$age" "$revert_state"
+                revert_ticket_status "$ticket_id" "$revert_state"
+                rm -f "$hb_file"
+                kill -- "-$(ps -o pgid= -p "$pipe_pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
+                    || kill "$pipe_pid" 2>/dev/null || true
+                exit 0
+            fi
+        done
+    ) &
+    STALE_WATCHDOG_PID=$!
+}
+
+stop_stale_watchdog() {
+    if [[ -n "${STALE_WATCHDOG_PID:-}" ]]; then
+        kill "$STALE_WATCHDOG_PID" 2>/dev/null || true
+        wait "$STALE_WATCHDOG_PID" 2>/dev/null || true
+        STALE_WATCHDOG_PID=""
+    fi
+}
+
+# Revert stale claims left by prior crashed agent instances and remove their locks.
+revert_stale_claims() {
+    local hb_prefix="$1"
+    local lock_prefix="$2"
+    local hb ticket_id revert_state mtime age
+    for hb in /tmp/${hb_prefix}-heartbeat-*.txt; do
+        [[ -f "$hb" ]] || continue
+        ticket_id=$(basename "$hb" .txt | sed "s/${hb_prefix}-heartbeat-//")
+        revert_state=$(cat "$hb" 2>/dev/null) || continue
+        mtime=$(stat -f %m "$hb" 2>/dev/null) || continue
+        age=$(( $(date +%s) - mtime ))
+        if (( age > STALE_THRESHOLD )); then
+            log WARN "Stale claim: $ticket_id (${age}s old, revert→'$revert_state')"
+            revert_ticket_status "$ticket_id" "$revert_state"
+            rm -f "$hb"
+            rmdir "/tmp/${lock_prefix}-lock-${ticket_id}" 2>/dev/null || true
+        else
+            log INFO "Active claim file found: $ticket_id (${age}s, within threshold)"
+        fi
+    done
 }
 
 # ── Phase summary ─────────────────────────────────────────────────────────────
@@ -485,7 +607,10 @@ review_ticket() {
         log INFO "  $ticket_id is locked by another local agent — skipping"
         return
     fi
-    trap "rmdir '$lock_dir' 2>/dev/null || true" RETURN
+    local HB_FILE="/tmp/review-heartbeat-${ticket_id}.txt"
+    echo "In Review" > "$HB_FILE"
+    # Release lock and heartbeat file on function exit (success, error, or return)
+    trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}'" RETURN
 
     divider "═" "Reviewing: $ticket_id"
     log WORK "Ticket  : $ticket_id"
@@ -503,8 +628,10 @@ review_ticket() {
                --output-format stream-json \
                --include-partial-messages \
                2>&1
-    ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" &
+    ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
     PIPELINE_PID=$!
+
+    start_stale_watchdog "$ticket_id" "$HB_FILE" "In Review" "$PIPELINE_PID"
 
     # Watchdog kills the pipeline group after TICKET_TIMEOUT seconds
     ( sleep "$TICKET_TIMEOUT" && \
@@ -516,6 +643,9 @@ review_ticket() {
     PIPELINE_PID=""
     kill "$WATCHDOG_PID" 2>/dev/null || true
     wait "$WATCHDOG_PID" 2>/dev/null || true
+
+    stop_stale_watchdog
+    rm -f "$HB_FILE"
 
     stop_heartbeat
 
@@ -664,6 +794,7 @@ on_interrupt() {
     echo ""
     log WARN "Interrupted — shutting down..."
     stop_heartbeat
+    stop_stale_watchdog
     if [[ -n "$PIPELINE_PID" ]]; then
         kill -- "-$(ps -o pgid= -p "$PIPELINE_PID" 2>/dev/null | tr -d ' ')" 2>/dev/null \
             || kill "$PIPELINE_PID" 2>/dev/null || true
@@ -701,6 +832,7 @@ main() {
 
     while true; do
         cycle=$((cycle + 1))
+        revert_stale_claims "review" "review"
         log INFO "Poll #${cycle} — $(date '+%Y-%m-%d %H:%M:%S')"
 
         local raw; raw=$(fetch_review_tickets)

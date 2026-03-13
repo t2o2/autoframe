@@ -485,6 +485,8 @@ process_ticket() {
     local exit_code=0
 
     # ── Per-ticket lock (parallel-safe, macOS/Linux) ─────────────────────────
+    # mkdir is atomic on APFS/HFS+/ext4 — if it succeeds we own the lock;
+    # if it fails the directory already exists (another agent holds it).
     local lock_dir="/tmp/agent-lock-${ticket_id}"
     if ! mkdir "$lock_dir" 2>/dev/null; then
         log INFO "  $ticket_id is locked by another local agent — skipping"
@@ -501,6 +503,7 @@ process_ticket() {
         fi
     fi
     echo "$REVERT_STATE" > "$HB_FILE"
+    # Release lock and heartbeat file on function exit (success, error, or return)
     trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}'" RETURN
 
     divider "═" "Processing: $ticket_id"
