@@ -724,7 +724,11 @@ main() {
         local pending=()
         while IFS= read -r tid; do
             if is_processed "$tid"; then
-                log INFO "  Skip (done this session): $tid"
+                # Ticket was cached but Linear returned it again — it cycled back.
+                # Evict from cache so it gets reprocessed.
+                sed -i '' "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null || true
+                log INFO "  $tid re-entered polling state — evicted from cache, will reprocess"
+                pending+=("$tid")
             else
                 pending+=("$tid")
             fi
