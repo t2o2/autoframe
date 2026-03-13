@@ -18,8 +18,8 @@ set -uo pipefail
 # ── Config ───────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$SCRIPT_DIR/autonomous-agent-logs"
-PROCESSED_FILE="/tmp/autonomous-agent-processed.txt"
+LOG_DIR="$SCRIPT_DIR/autonomous-process-logs"
+PROCESSED_FILE="/tmp/autonomous-process-processed.txt"
 
 # Load LINEAR_API_KEY from .env if not already set
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

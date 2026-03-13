@@ -206,7 +206,9 @@ Each agent writes structured session logs alongside the scripts:
 
 ```
 scripts/
-  autonomous-agent-logs/agent.log
+  autonomous-research-logs/agent.log
+  autonomous-plan-logs/agent.log
+  autonomous-process-logs/agent.log
   autonomous-review-logs/agent.log
   autonomous-approve-logs/agent.log
 ```
