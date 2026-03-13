@@ -357,6 +357,7 @@ start_status_watcher() {
             [[ -z "${LINEAR_API_KEY:-}" ]] && continue
             local state
             state=$(get_ticket_state "$ticket_id" 2>/dev/null) || continue
+            [[ -z "$state" ]] && continue
             if [[ "$state" != "$working_state" ]]; then
                 log INFO "  $ticket_id advanced to '$state' — work complete, terminating pipeline"
                 kill -- "-$(ps -o pgid= -p "$pipe_pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
