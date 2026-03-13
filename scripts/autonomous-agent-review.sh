@@ -253,6 +253,7 @@ stop_heartbeat() {
 
 STALE_THRESHOLD=1800   # 30 minutes — no stream output → revert
 STALE_WATCHDOG_PID=""
+STATUS_WATCHER_PID=""
 
 get_ticket_state() {
     local ticket_id="$1"
@@ -341,6 +342,39 @@ stop_stale_watchdog() {
         kill "$STALE_WATCHDOG_PID" 2>/dev/null || true
         wait "$STALE_WATCHDOG_PID" 2>/dev/null || true
         STALE_WATCHDOG_PID=""
+    fi
+}
+
+start_status_watcher() {
+    local ticket_id="$1"
+    local working_state="$2"  # ticket status while claude is working
+    local pipe_pid="$3"
+    local lock_dir="$4"
+    local hb_file="$5"
+    (
+        while kill -0 "$pipe_pid" 2>/dev/null; do
+            sleep 30
+            [[ -z "${LINEAR_API_KEY:-}" ]] && continue
+            local state
+            state=$(get_ticket_state "$ticket_id" 2>/dev/null) || continue
+            if [[ "$state" != "$working_state" ]]; then
+                log INFO "  $ticket_id advanced to '$state' — work complete, terminating pipeline"
+                kill -- "-$(ps -o pgid= -p "$pipe_pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
+                    || kill "$pipe_pid" 2>/dev/null || true
+                rm -f "$hb_file" 2>/dev/null || true
+                rmdir "$lock_dir" 2>/dev/null || true
+                exit 0
+            fi
+        done
+    ) &
+    STATUS_WATCHER_PID=$!
+}
+
+stop_status_watcher() {
+    if [[ -n "${STATUS_WATCHER_PID:-}" ]]; then
+        kill "$STATUS_WATCHER_PID" 2>/dev/null || true
+        wait "$STATUS_WATCHER_PID" 2>/dev/null || true
+        STATUS_WATCHER_PID=""
     fi
 }
 
@@ -631,11 +665,13 @@ review_ticket() {
     PIPELINE_PID=$!
 
     start_stale_watchdog "$ticket_id" "$HB_FILE" "In Review" "$PIPELINE_PID"
+    start_status_watcher "$ticket_id" "In Review" "$PIPELINE_PID" "$lock_dir" "$HB_FILE"
 
     wait "$PIPELINE_PID"
     exit_code=$?
     PIPELINE_PID=""
 
+    stop_status_watcher
     stop_stale_watchdog
     rm -f "$HB_FILE"
 
@@ -786,6 +822,7 @@ on_interrupt() {
     echo ""
     log WARN "Interrupted — shutting down..."
     stop_heartbeat
+    stop_status_watcher
     stop_stale_watchdog
     if [[ -n "$PIPELINE_PID" ]]; then
         kill -- "-$(ps -o pgid= -p "$PIPELINE_PID" 2>/dev/null | tr -d ' ')" 2>/dev/null \
