@@ -256,25 +256,26 @@ mkdir -p "${PROOF_DIR}"
 Ensure the frontend and its backing services are running (start via `just up` or `just dev` + `just dev-frontend` if not already). Then use Chrome DevTools MCP:
 
 1. `mcp__chrome-devtools__new_page` — open a fresh tab
-2. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
-3. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
+2. `mcp__chrome-devtools__resize_page` → `width: 1280, height: 800` (smaller viewport = faster uploads)
+3. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
+4. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
 
 Walk through **every acceptance criterion** that has a visible outcome. For each step:
 
 - Perform the action (click, fill form, submit, etc.)
-- `mcp__chrome-devtools__take_screenshot` → save to `${PROOF_DIR}/step-N-[description].png`
+- `mcp__chrome-devtools__take_screenshot` with `format: "jpeg"`, `quality: 70` → save to `${PROOF_DIR}/step-N-[description].jpg`
 - `mcp__chrome-devtools__list_console_messages` — confirm no new errors
 - **Immediately upload the screenshot to Linear:**
 
   ```bash
-  SCREENSHOT_B64=$(base64 -i "${PROOF_DIR}/step-N-[description].png")
+  SCREENSHOT_B64=$(base64 -i "${PROOF_DIR}/step-N-[description].jpg")
   ```
 
   Then call `mcp__linear-server__create_attachment`:
   - `issue`: `{{ARGUMENTS}}`
   - `base64Content`: the base64 string from above
-  - `filename`: `step-N-[description].png`
-  - `contentType`: `image/png`
+  - `filename`: `step-N-[description].jpg`
+  - `contentType`: `image/jpeg`
   - `title`: `[Step N] [Short description of what is shown]`
   - `subtitle`: `{{ARGUMENTS}} — implementation proof`
 
@@ -284,10 +285,10 @@ Walk through **every acceptance criterion** that has a visible outcome. For each
 
 | State | Filename | Linear attachment title |
 |---|---|---|
-| Feature page on load | `step-1-initial-state.png` | `[Step 1] Initial state` |
-| Happy path end state | `step-2-happy-path.png` | `[Step 2] Happy path — feature working` |
-| Error / validation state | `step-3-error-state.png` | `[Step 3] Error/validation state` |
-| Each additional criterion | `step-N-[criterion].png` | `[Step N] [Criterion description]` |
+| Feature page on load | `step-1-initial-state.jpg` | `[Step 1] Initial state` |
+| Happy path end state | `step-2-happy-path.jpg` | `[Step 2] Happy path — feature working` |
+| Error / validation state | `step-3-error-state.jpg` | `[Step 3] Error/validation state` |
+| Each additional criterion | `step-N-[criterion].jpg` | `[Step N] [Criterion description]` |
 
 If the frontend is not reachable, attempt to start it:
 
@@ -397,9 +398,9 @@ Local file existence alone is not sufficient — only a non-zero `attachments` c
    **Tests:** [summary — suites run, pass/fail counts]
 
    **Proof of working behaviour** (attachments uploaded to this ticket):
-   - 📸 `step-1-initial-state.png` — [what it shows]
-   - 📸 `step-2-happy-path.png` — [what it shows]
-   - 📸 `step-3-error-state.png` — [what it shows]
+   - 📸 `step-1-initial-state.jpg` — [what it shows]
+   - 📸 `step-2-happy-path.jpg` — [what it shows]
+   - 📸 `step-3-error-state.jpg` — [what it shows]
    (list every uploaded attachment filename)
 
    **Screenshots (inline previews):**
@@ -517,10 +518,11 @@ Phase 5b: Visual Proof [MANDATORY]
   ┌─────────────────────────────────────────────────┐
   │ UI tickets:                                     │
   │   new_page → navigate :8105                     │
-  │   take_screenshot per acceptance criterion      │
+  │   resize_page 1280×800 (once)                   │
+  │   take_screenshot jpeg q70 per criterion        │
   │   base64 encode → create_attachment on Linear   │
   │   record returned url for inline previews       │
-  │   → /tmp/screenshots/GYL-XX/step-N-*.png        │
+  │   → /tmp/screenshots/GYL-XX/step-N-*.jpg        │
   │                                                 │
   │ API/backend tickets:                            │
   │   curl happy path + error case                  │

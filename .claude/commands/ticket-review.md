@@ -206,26 +206,27 @@ sleep 10
 Use Chrome DevTools MCP:
 
 1. `mcp__chrome-devtools__new_page` — open fresh tab
-2. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
-3. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
+2. `mcp__chrome-devtools__resize_page` → `width: 1280, height: 800` (smaller viewport = faster uploads)
+3. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
+4. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
 
 Walk through **every acceptance criterion**. For each step:
 
 - Perform the action (click, submit, navigate)
-- `mcp__chrome-devtools__take_screenshot` → `${PROOF_DIR}/step-N-[criterion-slug].png`
+- `mcp__chrome-devtools__take_screenshot` with `format: "jpeg"`, `quality: 70` → `${PROOF_DIR}/step-N-[criterion-slug].jpg`
 - `mcp__chrome-devtools__list_console_messages` — confirm no new console errors
 - **Immediately upload to Linear and record the returned URL:**
 
   ```bash
-  SCREENSHOT_B64=$(base64 -i "${PROOF_DIR}/step-N-[criterion-slug].png")
+  SCREENSHOT_B64=$(base64 -i "${PROOF_DIR}/step-N-[criterion-slug].jpg")
   ```
 
   Call `mcp__linear-server__create_attachment`:
 
   - `issue`: `{{ARGUMENTS}}`
   - `base64Content`: base64 string above
-  - `filename`: `step-N-[criterion-slug].png`
-  - `contentType`: `image/png`
+  - `filename`: `step-N-[criterion-slug].jpg`
+  - `contentType`: `image/jpeg`
   - `title`: `[Review] [Step N] [Short description]`
   - `subtitle`: `{{ARGUMENTS}} — review proof`
 
@@ -235,10 +236,10 @@ Walk through **every acceptance criterion**. For each step:
 
 | State | Filename | Attachment title |
 |---|---|---|
-| Page on initial load | `step-1-initial-state.png` | `[Review] [Step 1] Initial state` |
-| Happy path end state | `step-2-happy-path.png` | `[Review] [Step 2] Happy path` |
-| Error / validation state | `step-3-error-state.png` | `[Review] [Step 3] Error state` |
-| Each additional criterion | `step-N-[criterion].png` | `[Review] [Step N] [Criterion]` |
+| Page on initial load | `step-1-initial-state.jpg` | `[Review] [Step 1] Initial state` |
+| Happy path end state | `step-2-happy-path.jpg` | `[Review] [Step 2] Happy path` |
+| Error / validation state | `step-3-error-state.jpg` | `[Review] [Step 3] Error state` |
+| Each additional criterion | `step-N-[criterion].jpg` | `[Review] [Step N] [Criterion]` |
 
 If `http://localhost:8105` is unreachable after attempting to start it — **this is a FAIL**:
 > "Browser validation failed — frontend could not be started. Blocking review."
@@ -408,9 +409,9 @@ Build the review comment. Post via `mcp__linear-server__save_comment`. Every sec
 
 | # | Filename | What it shows |
 |---|---|---|
-| 1 | `step-1-initial-state.png` | [description] |
-| 2 | `step-2-happy-path.png` | [description] |
-| 3 | `step-3-error-state.png` | [description] |
+| 1 | `step-1-initial-state.jpg` | [description] |
+| 2 | `step-2-happy-path.jpg` | [description] |
+| 3 | `step-3-error-state.jpg` | [description] |
 
 **Console errors found:** [none / list exact error text]
 
@@ -634,9 +635,10 @@ Phase 5: Visual Proof [MANDATORY — no skip]
   ┌──────────────────────────────────────────────────┐
   │ UI tickets:                                      │
   │   new_page → navigate :8105                      │
-  │   take_screenshot per acceptance criterion       │
+  │   resize_page 1280×800 (once)                    │
+  │   take_screenshot jpeg q70 per criterion         │
   │   base64 → create_attachment → record url        │
-  │   → /tmp/screenshots/GYL-XX-review/step-N-*.png  │
+  │   → /tmp/screenshots/GYL-XX-review/step-N-*.jpg  │
   │                                                  │
   │ API/backend tickets:                             │
   │   curl happy path + error case per criterion     │

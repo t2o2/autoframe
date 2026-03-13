@@ -255,7 +255,8 @@ mcp__chrome-devtools__navigate_page → [url]
 mcp__chrome-devtools__wait_for → [selector or text]
 mcp__chrome-devtools__fill → [input selector], [value]
 mcp__chrome-devtools__click → [button/link selector]
-mcp__chrome-devtools__take_screenshot  → verify each step
+mcp__chrome-devtools__resize_page → width: 1280, height: 800  (once, before first screenshot)
+mcp__chrome-devtools__take_screenshot → format: "jpeg", quality: 70  (verify each step)
 ```
 
 Login (if browser is used):
@@ -299,7 +300,7 @@ Based on the review type, present the outcome:
 ```
 mcp__chrome-devtools__navigate_page → [target page]
 mcp__chrome-devtools__wait_for → [the element under review]
-mcp__chrome-devtools__take_screenshot → /tmp/setup-review-{{ARGUMENTS}}-final.png
+mcp__chrome-devtools__take_screenshot → format: "jpeg", quality: 70, filePath: /tmp/setup-review-{{ARGUMENTS}}-final.jpg
 ```
 
 **API review** — make the API call and display the response:
