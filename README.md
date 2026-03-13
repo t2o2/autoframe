@@ -5,9 +5,9 @@ A self-contained template that wires Claude CLI to Linear for end-to-end autonom
 ## The Pipeline
 
 ```
-Todo                      →  autonomous-agent-research.sh  →  /ticket-research  →  Pending Research Approval
+Todo                      →  autonomous-agent-research.sh  →  /ticket-research  →  Research Pending Approval
                                                                                            ↓ (human approves → Planning)
-Planning                  →  autonomous-agent-plan.sh  →  /ticket-plan      →  Pending Plan Approval
+Planning                  →  autonomous-agent-plan.sh  →  /ticket-plan      →  Plan Pending Approval
                                                                                            ↓ (human approves → Plan Approved)
 Plan Approved / Changes Required  →  autonomous-agent-process.sh   →  /ticket-process   →  In Review
 In Review                 →  autonomous-agent-review.sh    →  /ticket-review    →  Human Review / Changes Required
@@ -33,9 +33,9 @@ The following workflow states must exist in your Linear team. Create them under 
 |---|---|
 | **Todo** | research-agent picks up tickets from here |
 | **Research** | research-agent sets this while exploring |
-| **Pending Research Approval** | research-agent sets this when done; human reviews and moves to Planning |
+| **Research Pending Approval** | research-agent sets this when done; human reviews and moves to Planning |
 | **Planning** | planning-agent picks up from here |
-| **Pending Plan Approval** | planning-agent sets this when done; human reviews and moves to Plan Approved |
+| **Plan Pending Approval** | planning-agent sets this when done; human reviews and moves to Plan Approved |
 | **Plan Approved** | coding-agent picks up from here |
 | **In Progress** | coding-agent sets this while implementing |
 | **In Review** | coding-agent sets this after pushing; review-agent picks up from here |
@@ -60,7 +60,7 @@ Once configured, run each agent in a separate terminal from your project root:
 
 ```bash
 ./scripts/autonomous-agent-research.sh   # researches Todo tickets
-./scripts/autonomous-agent-plan.sh   # plans Pending Research Approval → Planning tickets
+./scripts/autonomous-agent-plan.sh   # plans Research Pending Approval → Planning tickets
 ./scripts/autonomous-agent-process.sh            # implements Plan Approved + Changes Required tickets
 ./scripts/autonomous-agent-review.sh     # reviews In Review tickets
 ./scripts/autonomous-agent-approve.sh    # merges Merging tickets
@@ -100,7 +100,7 @@ Researches a ticket by exploring the codebase and posting findings as a ticket c
 2. Decomposes the ticket into research areas
 3. Spawns parallel `Explore` agents — one per area (scope, patterns, tests, schema)
 4. Synthesizes findings into a structured research document with file:line references
-5. Posts the document as a ticket comment and moves to `Pending Research Approval`
+5. Posts the document as a ticket comment and moves to `Research Pending Approval`
 
 No code changes are made — this is a read-only codebase pass.
 
@@ -112,7 +112,7 @@ Creates a phased implementation plan from the ticket and its research comment:
 2. Spawns `Explore` agents to fill any remaining gaps
 3. Resolves architectural decisions; posts a comment if human judgment is needed
 4. Writes a phased plan — each phase has explicit file changes and success criteria
-5. Posts the plan as a ticket comment and moves to `Pending Plan Approval`
+5. Posts the plan as a ticket comment and moves to `Plan Pending Approval`
 
 No code changes are made — this is a planning-only pass.
 

@@ -1,10 +1,10 @@
 ---
-description: Research a Linear ticket — explore the codebase and post findings as a ticket comment, then move to Pending Research Approval
+description: Research a Linear ticket — explore the codebase and post findings as a ticket comment, then move to Research Pending Approval
 runInPlanMode: false
 scope: project
 ---
 
-Research a Linear ticket by exploring the codebase and posting a structured research document as a ticket comment. Moves the ticket `Todo → Research → Pending Research Approval`.
+Research a Linear ticket by exploring the codebase and posting a structured research document as a ticket comment. Moves the ticket `Todo → Research → Research Pending Approval`.
 
 ## Request
 
@@ -123,7 +123,7 @@ Compile all sub-agent findings into a structured research document. Be factual a
 
    `mcp__linear-server__save_comment` → `{ issue: "{{ARGUMENTS}}", body: <research document> }`
 
-2. Set ticket status to `Pending Research Approval`:
+2. Set ticket status to `Research Pending Approval`:
 
    `mcp__linear-server__save_issue` → `{ id, statusId: <pending_research_approval_id> }`
 
@@ -136,7 +136,7 @@ Compile all sub-agent findings into a structured research document. Be factual a
 
 ```
 Todo       →  Research                    (Phase 1)
-Research   →  Pending Research Approval   (Phase 5)
+Research   →  Research Pending Approval   (Phase 5)
 ```
 
 ## Critical Rules
@@ -182,6 +182,6 @@ Phase 4: Synthesize Research
                          ▼
 Phase 5: Post & Transition
   save_comment: research document
-  save_issue: Pending Research Approval
+  save_issue: Research Pending Approval
   save_comment: "next step: move to Research Approved"
 ```

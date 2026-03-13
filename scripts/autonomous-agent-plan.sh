@@ -243,7 +243,7 @@ Write a concise per-phase summary of what actually happened. Use ONLY phases tha
 **Phase 2 — Fill Research Gaps:** <sub-agents spawned, gaps filled>
 **Phase 3 — Resolve Key Decisions:** <decisions made, any human judgment comments posted>
 **Phase 4 — Write Implementation Plan:** <number of phases planned, key files identified, scope estimate>
-**Phase 5 — Post Plan & Transition:** <comment posted, status moved to Pending Plan Approval>
+**Phase 5 — Post Plan & Transition:** <comment posted, status moved to Plan Pending Approval>
 
 Skip phases that did not run. Be factual. No filler.
 
@@ -572,7 +572,7 @@ trap on_exit EXIT
 main() {
     divider "═"
     log INFO "  Autonomous Planning Agent"
-    log INFO "  Picks up: Research Approved → Planning → Pending Plan Approval"
+    log INFO "  Picks up: Research Approved → Planning → Plan Pending Approval"
     log INFO "  Poll interval  : ${POLL_INTERVAL}s"
     log INFO "  Heartbeat      : ${HEARTBEAT_INTERVAL}s"
     log INFO "  Session logs   : $LOG_DIR/"

@@ -1,10 +1,10 @@
 ---
-description: Create a phased implementation plan for a Linear ticket and post it as a comment, then move to Pending Plan Approval
+description: Create a phased implementation plan for a Linear ticket and post it as a comment, then move to Plan Pending Approval
 runInPlanMode: false
 scope: project
 ---
 
-Create a detailed implementation plan for a Linear ticket. Reads the ticket's research comment, explores any gaps in the codebase, designs a phased plan with specific file changes and success criteria, and posts it as a ticket comment. Moves the ticket to `Pending Plan Approval`.
+Create a detailed implementation plan for a Linear ticket. Reads the ticket's research comment, explores any gaps in the codebase, designs a phased plan with specific file changes and success criteria, and posts it as a ticket comment. Moves the ticket to `Plan Pending Approval`.
 
 ## Request
 
@@ -164,7 +164,7 @@ Manual:
 
    `mcp__linear-server__save_comment` → `{ issue: "{{ARGUMENTS}}", body: <plan> }`
 
-2. Set ticket status to `Pending Plan Approval`:
+2. Set ticket status to `Plan Pending Approval`:
 
    `mcp__linear-server__save_issue` → `{ id, statusId: <pending_plan_approval_id> }`
 
@@ -177,7 +177,7 @@ Manual:
 
 ```
 Research Approved  →  Planning              (Phase 1 — claim)
-Planning           →  Pending Plan Approval (Phase 5)
+Planning           →  Plan Pending Approval (Phase 5)
 ```
 
 ## Critical Rules
@@ -220,6 +220,6 @@ Phase 4: Write Implementation Plan
                          ▼
 Phase 5: Post & Transition
   save_comment: implementation plan
-  save_issue: Pending Plan Approval
+  save_issue: Plan Pending Approval
   save_comment: "next step: move to Plan Approved"
 ```

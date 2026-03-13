@@ -243,7 +243,7 @@ Write a concise per-phase summary of what actually happened. Use ONLY phases tha
 **Phase 2 — Identify Research Areas:** <areas identified for investigation>
 **Phase 3 — Parallel Codebase Exploration:** <sub-agents spawned, what each found>
 **Phase 4 — Synthesize Research:** <key findings, files identified, complexity estimate>
-**Phase 5 — Post Research & Transition:** <comment posted, status moved to Pending Research Approval>
+**Phase 5 — Post Research & Transition:** <comment posted, status moved to Research Pending Approval>
 
 Skip phases that did not run. Be factual. No filler.
 
@@ -572,7 +572,7 @@ trap on_exit EXIT
 main() {
     divider "═"
     log INFO "  Autonomous Research Agent"
-    log INFO "  Picks up: Todo → Research → Pending Research Approval"
+    log INFO "  Picks up: Todo → Research → Research Pending Approval"
     log INFO "  Poll interval  : ${POLL_INTERVAL}s"
     log INFO "  Heartbeat      : ${HEARTBEAT_INTERVAL}s"
     log INFO "  Session logs   : $LOG_DIR/"
