@@ -267,13 +267,16 @@ Walk through **every acceptance criterion** that has a visible outcome. For each
 - Perform the action (click, fill form, submit, etc.)
 - `mcp__chrome-devtools__take_screenshot` with `format: "jpeg"`, `quality: 70` → save to `${PROOF_DIR}/step-N-[description].jpg`
 - `mcp__chrome-devtools__list_console_messages` — confirm no new errors
-- **Immediately upload the screenshot to Linear:**
+- **Compress and upload the screenshot to Linear:**
 
   ```bash
+  # Downscale to max 1200px on longest side (keeps file under ~150KB)
+  sips -Z 1200 "${PROOF_DIR}/step-N-[description].jpg"
   SCREENSHOT_B64=$(base64 -i "${PROOF_DIR}/step-N-[description].jpg")
   ```
 
   Then call `mcp__linear-server__create_attachment`:
+
   - `issue`: `{{ARGUMENTS}}`
   - `base64Content`: the base64 string from above
   - `filename`: `step-N-[description].jpg`

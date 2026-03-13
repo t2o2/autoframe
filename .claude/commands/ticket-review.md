@@ -224,9 +224,11 @@ Walk through **every acceptance criterion**. For each step:
 - Perform the action (click, submit, navigate)
 - `mcp__chrome-devtools__take_screenshot` with `format: "jpeg"`, `quality: 70` → `${PROOF_DIR}/step-N-[criterion-slug].jpg`
 - `mcp__chrome-devtools__list_console_messages` — confirm no new console errors
-- **Immediately upload to Linear and record the returned URL:**
+- **Compress and upload to Linear, record the returned URL:**
 
   ```bash
+  # Downscale to max 1200px on longest side (keeps file under ~150KB)
+  sips -Z 1200 "${PROOF_DIR}/step-N-[criterion-slug].jpg"
   SCREENSHOT_B64=$(base64 -i "${PROOF_DIR}/step-N-[criterion-slug].jpg")
   ```
 
