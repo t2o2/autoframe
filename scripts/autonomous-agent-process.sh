@@ -455,8 +455,8 @@ stop_stale_watchdog() {
 
 # Revert stale claims left by prior crashed agent instances
 revert_stale_claims() {
-    local hb_prefix="$1"    # e.g. "research" or "coding"
-    local lock_prefix="$2"  # e.g. "research" or "agent"
+    local hb_prefix="$1"    # e.g. "process"
+    local lock_prefix="$2"  # e.g. "process"
     local stale_secs="$STALE_THRESHOLD"
     local hb ticket_id revert_state mtime age
     # nullglob: skip silently if no files match
@@ -487,12 +487,12 @@ process_ticket() {
     # ── Per-ticket lock (parallel-safe, macOS/Linux) ─────────────────────────
     # mkdir is atomic on APFS/HFS+/ext4 — if it succeeds we own the lock;
     # if it fails the directory already exists (another agent holds it).
-    local lock_dir="/tmp/agent-lock-${ticket_id}"
+    local lock_dir="/tmp/process-lock-${ticket_id}"
     if ! mkdir "$lock_dir" 2>/dev/null; then
         log INFO "  $ticket_id is locked by another local agent — skipping"
         return
     fi
-    local HB_FILE="/tmp/coding-heartbeat-${ticket_id}.txt"
+    local HB_FILE="/tmp/process-heartbeat-${ticket_id}.txt"
     # Capture pre-claim state so we can revert correctly on crash
     local REVERT_STATE="Plan Approved"   # safe fallback
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
@@ -634,7 +634,7 @@ main() {
 
     while true; do
         cycle=$((cycle + 1))
-        revert_stale_claims "coding" "agent"
+        revert_stale_claims "process" "process"
         log INFO "Poll #${cycle} — $(date '+%Y-%m-%d %H:%M:%S')"
 
         local raw; raw=$(fetch_pending_tickets)

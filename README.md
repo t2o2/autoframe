@@ -172,8 +172,33 @@ The `wtp` helper manages this. If not installed, the scripts fall back to `git w
 |---|---|---|
 | `LINEAR_API_KEY` | `.auto-claude/.env` or shell env | Linear personal API key |
 | `LINEAR_TEAM_KEY` | `.auto-claude/.env` or shell env | Linear team identifier (e.g. `ENG`) |
+| `TELEGRAM_BOT_TOKEN` | `.auto-claude/.env` or shell env | Telegram bot token (from `@BotFather`) |
+| `TELEGRAM_CHAT_ID` | `.auto-claude/.env` or shell env | Your Telegram chat or user ID |
 
-Both variables can be set in the environment before running the scripts, or stored in `.auto-claude/.env` (created by `setup.sh`).
+All variables can be set in the environment before running the scripts, or stored in `.auto-claude/.env` (created by `setup.sh`).
+
+### Telegram setup (optional — enables human-in-the-loop input)
+
+When an agent needs a decision it can't resolve from code, it sends the question to Telegram and waits up to 1 hour for a reply before applying a default.
+
+1. Message `@BotFather` → `/newbot` → copy the token
+2. Start a chat with your bot, then get your chat ID:
+   ```bash
+   curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
+   # Look for "chat":{"id": ...} in the result
+   ```
+3. Add to `.auto-claude/.env`:
+   ```
+   TELEGRAM_BOT_TOKEN=<token>
+   TELEGRAM_CHAT_ID=<chat_id>
+   ```
+
+**Reply formats** — send in Telegram when asked:
+- `2` — choose option 2
+- `1,3` — choose options 1 and 3 (multi-select)
+- `all` — choose all options
+- `skip` — pass with no input
+- any other text — treated as a free-text answer
 
 ## Logs
 

@@ -82,6 +82,7 @@ SCRIPTS=(
     "scripts/autonomous-agent-process.sh"
     "scripts/autonomous-agent-review.sh"
     "scripts/autonomous-agent-approve.sh"
+    "scripts/ask-human.sh"
 )
 
 COMMANDS=(

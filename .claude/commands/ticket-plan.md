@@ -64,7 +64,13 @@ Before writing the plan, identify any architectural decisions that must be made:
 - Are there multiple valid implementations — if so, which is most consistent with the codebase?
 - Does any part of the ticket scope conflict with the current architecture?
 
-If a decision genuinely requires human judgment and cannot be resolved by reading the code, post a comment and proceed with the most conservative/consistent approach:
+If a decision genuinely requires human judgment and cannot be resolved by reading the code, ask via Telegram then proceed with the response:
+
+```
+Bash: ./scripts/ask-human.sh {{ARGUMENTS}} "<question>" "<option1>" "<option2>" "<option3>"
+```
+
+Use the returned text as the chosen approach. If the script exits 1 (timeout), the default (option 1) was applied — note this in the plan. If the script exits 2 (no credentials), fall back to posting a Linear comment and proceeding with the most conservative approach:
 > "Planning for {{ARGUMENTS}}: key decision — [question]. Proceeding with [chosen approach] — override by moving ticket back to Planning with a comment."
 
 ---

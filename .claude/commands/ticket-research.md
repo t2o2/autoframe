@@ -31,7 +31,13 @@ mcp__linear-server__save_issue → { id, statusId: <research_id> }
 Post a claiming comment:
 > "Picking up research for {{ARGUMENTS}}. Exploring codebase to understand scope, relevant files, and implementation context before planning begins."
 
-If description is too vague (< 2 actionable sentences), use `AskUserQuestion` to gather context before proceeding.
+If description is too vague (< 2 actionable sentences), ask via Telegram before proceeding:
+
+```
+Bash: ./scripts/ask-human.sh {{ARGUMENTS}} "Ticket description is too vague to research. What is the goal?" "Clarify in Linear and re-trigger" "Describe the intended behaviour here"
+```
+
+Use the returned text as the clarification context. If the script exits 2 (no credentials), fall back to `AskUserQuestion`.
 
 ---
 
