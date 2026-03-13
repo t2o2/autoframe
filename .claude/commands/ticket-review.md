@@ -1,5 +1,5 @@
 ---
-description: Review a Linear ticket — run tests, validate in browser, move to Human Review or Changes Required
+description: Review a Linear ticket (input state: Review Pending) — run tests, validate in browser, move to Human Review or Changes Required
 runInPlanMode: false
 scope: project
 ---
@@ -431,8 +431,9 @@ The worktree used for review is the implementation worktree — it is owned by `
 ## Status Transition Map
 
 ```
-In Review / In Progress  →  Human Review       (PASS: all tests green, criteria met)
-In Review / In Progress  →  Changes Required   (FAIL: any test red, criteria missed)
+Review Pending  →  In Review        (Phase 1, on claim)
+In Review       →  Human Review     (PASS: all tests green, criteria met)
+In Review       →  Changes Required (FAIL: any test red, criteria missed)
 ```
 
 ## Evidence Standards

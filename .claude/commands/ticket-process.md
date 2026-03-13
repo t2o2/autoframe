@@ -153,7 +153,7 @@ If tests fail: attempt to fix (up to 2 iterations). After 2 failed attempts, pos
 
 ## Phase 5b — Visual Proof (Mandatory)
 
-**Every ticket requires proof that the implemented behaviour actually works. No ticket moves to In Review without it. All proof must be uploaded to the Linear ticket — not just saved locally.**
+**Every ticket requires proof that the implemented behaviour actually works. No ticket moves to Review Pending without it. All proof must be uploaded to the Linear ticket — not just saved locally.**
 
 Set the proof directory:
 
@@ -279,7 +279,7 @@ Local file existence alone is not sufficient — only a non-zero `attachments` c
    ```
 
 3. Update ticket status:
-   - Changes pushed, review needed → find "In Review" status ID → `mcp__linear-server__save_issue`
+   - Changes pushed, review needed → find "Review Pending" status ID → `mcp__linear-server__save_issue`
    - Self-contained and complete → find "Done" status ID → `mcp__linear-server__save_issue`
 
 4. Post completion comment — **include the branch name so `/ticket-review` can find it**:
@@ -337,9 +337,9 @@ Local file existence alone is not sufficient — only a non-zero `attachments` c
 ## Status Transitions
 
 ```
-Backlog / Todo  →  In Progress   (Phase 2)
-In Progress     →  In Review     (Phase 6, PR path)
-In Progress     →  Done          (Phase 6, self-contained)
+Backlog / Todo  →  In Progress      (Phase 2)
+In Progress     →  Review Pending   (Phase 6, PR path)
+In Progress     →  Done             (Phase 6, self-contained)
 ```
 
 ## Critical Rules
@@ -417,7 +417,7 @@ Phase 5b: Visual Proof [MANDATORY]
                ▼
 Phase 6: Commit + Push + Hand Off
   git commit + git push origin feat/TICKET-XX
-  save_issue: In Review / Done
+  save_issue: Review Pending / Done
   save_comment: branch name + changes + proof filenames + inline image previews
   [worktree kept for /ticket-review]
 ```

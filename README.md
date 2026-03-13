@@ -9,8 +9,8 @@ Todo                      →  autonomous-agent-research.sh  →  /ticket-resear
                                                                                            ↓ (human approves → Planning)
 Planning                  →  autonomous-agent-plan.sh  →  /ticket-plan      →  Plan Pending Approval
                                                                                            ↓ (human approves → Plan Approved)
-Plan Approved / Changes Required  →  autonomous-agent-process.sh   →  /ticket-process   →  In Review
-In Review                 →  autonomous-agent-review.sh    →  /ticket-review    →  Human Review / Changes Required
+Plan Approved / Changes Required  →  autonomous-agent-process.sh   →  /ticket-process   →  Review Pending
+Review Pending            →  autonomous-agent-review.sh    →  /ticket-review    →  Human Review / Changes Required
 Merging                   →  autonomous-agent-approve.sh   →  /ticket-approve   →  Done
 ```
 
@@ -38,7 +38,8 @@ The following workflow states must exist in your Linear team. Create them under 
 | **Plan Pending Approval** | planning-agent sets this when done; human reviews and moves to Plan Approved |
 | **Plan Approved** | coding-agent picks up from here |
 | **In Progress** | coding-agent sets this while implementing |
-| **In Review** | coding-agent sets this after pushing; review-agent picks up from here |
+| **Review Pending** | coding-agent sets this after pushing; review-agent polls this and claims by setting In Review |
+| **In Review** | review-agent sets this while reviewing the ticket |
 | **Human Review** | review-agent sets this on PASS; human verifies then moves to Merging |
 | **Merging** | human sets this to trigger approve-agent |
 | **Done** | approve-agent sets this after merge |
@@ -126,21 +127,22 @@ Picks up a ticket from Linear and implements it end-to-end:
 4. Implements using TDD (red → green → refactor), all changes in the worktree
 5. Runs the project's test suite
 6. Captures visual proof (screenshots or API responses) and uploads to Linear
-7. Commits, pushes the branch, and moves the ticket to In Review
+7. Commits, pushes the branch, and moves the ticket to Review Pending
 
 The worktree is kept after the command completes — the review agent reuses it.
 
 ### `/ticket-review <TICKET-ID>`
 
-Reviews a completed ticket branch:
+Reviews a completed ticket branch (input state: Review Pending):
 
-1. Finds the implementation branch from the Linear comments
-2. Reuses the existing worktree (no new checkout needed)
-3. Runs a code review via an Explore agent scoped to changed files
-4. Runs all applicable test suites; writes missing tests if gaps are found
-5. Captures review proof and uploads to Linear
-6. Posts a structured review comment (test table, inline screenshots, code concerns)
-7. PASS → moves to Human Review; FAIL → moves to Changes Required
+1. Claims the ticket by setting it to In Review
+2. Finds the implementation branch from the Linear comments
+3. Reuses the existing worktree (no new checkout needed)
+4. Runs a code review via an Explore agent scoped to changed files
+5. Runs all applicable test suites; writes missing tests if gaps are found
+6. Captures review proof and uploads to Linear
+7. Posts a structured review comment (test table, inline screenshots, code concerns)
+8. PASS → moves to Human Review; FAIL → moves to Changes Required
 
 ### `/ticket-approve <TICKET-ID>`
 

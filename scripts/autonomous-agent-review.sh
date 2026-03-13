@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # autonomous-review-agent.sh
 #
-# Polls Linear for "In Review" tickets, then reviews them one-by-one using
+# Polls Linear for "Review Pending" tickets, then reviews them one-by-one using
 # /ticket-review. Shows live streaming output with real-time phase banners
 # and a structured per-phase summary at the end of each ticket.
 #
@@ -491,7 +491,7 @@ interruptible_sleep() {
 # ── Linear query ──────────────────────────────────────────────────────────────
 
 fetch_review_tickets() {
-    log INFO "Querying Linear for 'In Review' tickets..."
+    log INFO "Querying Linear for 'Review Pending' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -503,7 +503,7 @@ fetch_review_tickets() {
     response=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d '{"query":"{ issues(filter:{team:{key:{eq:\"GYL\"}},state:{name:{eq:\"In Review\"}}}) { nodes { identifier } } }"}' \
+        -d '{"query":"{ issues(filter:{team:{key:{eq:\"GYL\"}},state:{name:{eq:\"Review Pending\"}}}) { nodes { identifier } } }"}' \
         https://api.linear.app/graphql 2>/dev/null)
 
     if [[ $? -ne 0 || -z "$response" ]]; then
@@ -533,9 +533,9 @@ is_processed()   { grep -qxF "$1" "$PROCESSED_FILE" 2>/dev/null; }
 mark_processed() { echo "$1" >> "$PROCESSED_FILE"; }
 
 # ── Linear status check ───────────────────────────────────────────────────────
-# Returns 0 (still In Review) or 1 (moved on to Human Review / Changes Required / etc.)
+# Returns 0 (still actionable — Review Pending or In Review) or 1 (moved on to Human Review / Changes Required / etc.)
 
-ticket_still_in_review() {
+ticket_still_actionable() {
     local ticket_id="$1"
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
@@ -557,7 +557,7 @@ nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
 print(nodes[0]['state']['name'] if nodes else '')
 " <<< "$response" 2>/dev/null)
 
-    [[ "$state_name" == "In Review" ]]
+    [[ "$state_name" == "Review Pending" || "$state_name" == "In Review" ]]
 }
 
 # ── Post-pass build check ─────────────────────────────────────────────────────
@@ -647,7 +647,7 @@ review_ticket() {
         return
     fi
     local HB_FILE="/tmp/review-heartbeat-${ticket_id}.txt"
-    echo "In Review" > "$HB_FILE"
+    echo "Review Pending" > "$HB_FILE"
     # Release lock and heartbeat file on function exit (success, error, or return)
     trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}'" RETURN
 
@@ -670,8 +670,8 @@ review_ticket() {
     ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
     PIPELINE_PID=$!
 
-    start_stale_watchdog "$ticket_id" "$HB_FILE" "In Review" "$PIPELINE_PID"
-    start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" "In Review"
+    start_stale_watchdog "$ticket_id" "$HB_FILE" "Review Pending" "$PIPELINE_PID"
+    start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" "Review Pending:In Review"
 
     wait "$PIPELINE_PID"
     exit_code=$?
@@ -804,8 +804,8 @@ PYEOF
     summarize_phases "$ticket_id" "$log_file"
 
     # ── Conditional cache: only skip on future polls if Linear status moved on ─
-    if ticket_still_in_review "$ticket_id"; then
-        log WARN "  $ticket_id still 'In Review' — will retry next poll (not cached)"
+    if ticket_still_actionable "$ticket_id"; then
+        log WARN "  $ticket_id still actionable — will retry next poll (not cached)"
     else
         mark_processed "$ticket_id"
         log INFO "  $ticket_id status advanced — cached to skip future polls"
@@ -855,7 +855,7 @@ trap on_exit EXIT
 main() {
     divider "═"
     log INFO "  Autonomous Linear Review Agent"
-    log INFO "  Watching status : In Review"
+    log INFO "  Watching status : Review Pending"
     log INFO "  Poll interval   : ${POLL_INTERVAL}s"
     log INFO "  Heartbeat       : ${HEARTBEAT_INTERVAL}s"
     log INFO "  Session logs    : $LOG_DIR/"
@@ -874,7 +874,7 @@ main() {
         local ticket_ids; ticket_ids=$(parse_ticket_ids "$raw") || true
 
         if [[ -z "$ticket_ids" ]]; then
-            log INFO "No 'In Review' tickets. Sleeping ${POLL_INTERVAL}s..."
+            log INFO "No 'Review Pending' tickets. Sleeping ${POLL_INTERVAL}s..."
             interruptible_sleep "$POLL_INTERVAL"
             continue
         fi
@@ -893,7 +893,7 @@ main() {
         done <<< "$ticket_ids"
 
         if [[ ${#pending[@]} -eq 0 ]]; then
-            log INFO "All 'In Review' tickets already processed this session. Sleeping ${POLL_INTERVAL}s..."
+            log INFO "All 'Review Pending' tickets already processed this session. Sleeping ${POLL_INTERVAL}s..."
             interruptible_sleep "$POLL_INTERVAL"
             continue
         fi
