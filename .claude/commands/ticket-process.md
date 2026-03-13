@@ -130,6 +130,8 @@ If description is too vague (< 2 actionable sentences):
 
 ## Phase 2 — Claim the Ticket
 
+**Always run this phase** — whether the ticket is fresh (Todo/Backlog) or being re-processed (Change Required). Do not skip it even when resuming an existing worktree.
+
 1. Find "In Progress" status ID from Phase 1 results
 2. Resolve the git user email to use as the Linear assignee:
 
@@ -256,9 +258,8 @@ mkdir -p "${PROOF_DIR}"
 Ensure the frontend and its backing services are running (start via `just up` or `just dev` + `just dev-frontend` if not already). Then use Chrome DevTools MCP:
 
 1. `mcp__chrome-devtools__new_page` — open a fresh tab
-2. `mcp__chrome-devtools__resize_page` → `width: 1280, height: 800` (smaller viewport = faster uploads)
-3. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
-4. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
+2. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
+3. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
 
 Walk through **every acceptance criterion** that has a visible outcome. For each step:
 
@@ -518,7 +519,6 @@ Phase 5b: Visual Proof [MANDATORY]
   ┌─────────────────────────────────────────────────┐
   │ UI tickets:                                     │
   │   new_page → navigate :8105                     │
-  │   resize_page 1280×800 (once)                   │
   │   take_screenshot jpeg q70 per criterion        │
   │   base64 encode → create_attachment on Linear   │
   │   record returned url for inline previews       │

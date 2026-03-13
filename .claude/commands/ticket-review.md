@@ -215,9 +215,8 @@ sleep 10
 Use Chrome DevTools MCP:
 
 1. `mcp__chrome-devtools__new_page` — open fresh tab
-2. `mcp__chrome-devtools__resize_page` → `width: 1280, height: 800` (smaller viewport = faster uploads)
-3. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
-4. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
+2. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
+3. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
 
 Walk through **every acceptance criterion**. For each step:
 
@@ -646,7 +645,6 @@ Phase 5: Visual Proof [MANDATORY — no skip]
   ┌──────────────────────────────────────────────────┐
   │ UI tickets:                                      │
   │   new_page → navigate :8105                      │
-  │   resize_page 1280×800 (once)                    │
   │   take_screenshot jpeg q70 per criterion         │
   │   base64 → create_attachment → record url        │
   │   → /tmp/screenshots/GYL-XX-review/step-N-*.jpg  │
