@@ -1,0 +1,89 @@
+version: '3.9'
+
+# Each container clones GIT_REPO_URL fresh into /workspace/repo and works
+# entirely within that clone — host code is never mounted. Branches are pushed
+# back to the remote; the host and container codebases never interfere.
+
+x-agent-base: &agent-base
+  build:
+    context: .
+    args:
+      TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
+  platform: linux/${DOCKER_PLATFORM:-arm64}
+  working_dir: /workspace/repo
+  volumes:
+    # Claude auth and commands — read-only from host
+    - ${HOME}/.claude.json:/opt/host-claude.json:ro
+    - ${HOME}/.claude:/opt/host-claude:ro
+    # SSH key for git (optional — use if GIT_REPO_URL is an ssh:// URL)
+    # - ${HOME}/.ssh:/home/agent/.ssh:ro
+    # Persistent Rust build cache — survives container restarts
+    - cargo_target:/cache/cargo_target
+  environment:
+    # ── Git ──────────────────────────────────────────────────────────────────
+    - GIT_REPO_URL           # e.g. https://github.com/org/repo.git
+    - GIT_BASE_BRANCH        # branch to clone from (default: develop)
+    - GITHUB_TOKEN           # HTTPS auth; leave unset if using SSH mount
+    # ── Linear ───────────────────────────────────────────────────────────────
+    - LINEAR_API_KEY
+    - LINEAR_TEAM_KEY
+    # ── Anthropic / OpenRouter ────────────────────────────────────────────────
+    - ANTHROPIC_API_KEY      # direct Anthropic key
+    - ANTHROPIC_BASE_URL     # override API endpoint (e.g. OpenRouter)
+    - CLAUDE_CODE_OAUTH_TOKEN  # long-lived token from: claude setup-token
+    - OPENROUTER_API_KEY       # fallback: OpenRouter key
+    - OR_MODEL_NORMAL          # OpenRouter model for standard agents
+    - OR_MODEL_ADVANCED        # OpenRouter model for plan/review agents
+    # ── Runtime ──────────────────────────────────────────────────────────────
+    - HOME=/home/agent
+    - CARGO_TARGET_DIR=/cache/cargo_target
+    - RUST_LOG=${RUST_LOG:-info}
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+    - "cdn.growthbook.io:127.0.0.1"
+
+services:
+  process:
+    <<: *agent-base
+    container_name: agent-process
+    command: ["./scripts/autonomous-agent-process.sh"]
+    profiles: ["process", "all"]
+    environment:
+      - AGENT_TIER=normal
+
+  review:
+    <<: *agent-base
+    container_name: agent-review
+    command: ["./scripts/autonomous-agent-review.sh"]
+    profiles: ["review", "all"]
+    environment:
+      - AGENT_TIER=advanced
+
+  approve:
+    <<: *agent-base
+    container_name: agent-approve
+    command: ["./scripts/autonomous-agent-approve.sh"]
+    profiles: ["approve", "all"]
+    environment:
+      - AGENT_TIER=normal
+
+  research:
+    <<: *agent-base
+    container_name: agent-research
+    command: ["./scripts/autonomous-agent-research.sh"]
+    profiles: ["research", "all"]
+    environment:
+      - AGENT_TIER=normal
+
+  plan:
+    <<: *agent-base
+    container_name: agent-plan
+    command: ["./scripts/autonomous-agent-plan.sh"]
+    profiles: ["plan", "all"]
+    environment:
+      - AGENT_TIER=advanced
+
+volumes:
+  cargo_target:
+    name: autoframe_cargo_target
