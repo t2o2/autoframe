@@ -14,16 +14,16 @@ Review Pending            →  autonomous-agent-review.sh    →  /ticket-review
 Merging                   →  autonomous-agent-approve.sh   →  /ticket-approve   →  Done
 ```
 
-Each script runs independently and polls Linear for tickets in its target state. All five can run simultaneously in separate terminals.
+Each script runs independently and polls Linear for tickets in its target state. All five can run simultaneously as separate containers.
 
 The research and planning stages each include a human checkpoint — after the agent posts its output, a human reviews and manually advances the ticket to the next state before the next agent picks it up.
 
 ## Prerequisites
 
-- **Claude CLI** — `npm install -g @anthropic-ai/claude-code` then `claude login`
-- **wtp** — git worktree helper, install from https://github.com/nicholasgasior/wtp (optional — scripts fall back to plain `git worktree` commands if not found)
+- **Docker** and **Docker Compose** — all other tools (Claude CLI, Chromium, wtp, ImageMagick, Rust) are bundled in the image
 - **Linear API key** — create one at https://linear.app/settings/api with Issues read+write scope
-- `git`, `curl`, `python3` — standard Unix tools
+- **Git remote** — HTTPS (via `GITHUB_TOKEN`) or SSH (via mounted `~/.ssh`)
+- **Claude credentials** — subscription OAuth token, Anthropic API key, or OpenRouter key (see [Auth](#auth))
 
 ## Linear Setup
 
@@ -45,38 +45,74 @@ The following workflow states must exist in your Linear team. Create them under 
 | **Done** | approve-agent sets this after merge |
 | **Changes Required** | review-agent sets this on FAIL; coding-agent picks up again |
 
-If you want to skip the research/planning stages and use only the original three agents, simply move tickets directly to **Plan Approved** or **In Progress** and only run `autonomous-agent-process.sh`, `autonomous-agent-review.sh`, and `autonomous-agent-approve.sh`.
+If you want to skip the research/planning stages, move tickets directly to **Plan Approved** and run only the `process`, `review`, and `approve` profiles.
 
 ## Quick Start
 
-Run this from inside your existing repo:
+**1. Configure your environment**
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/t2o2/autoframe/master/setup.sh)
+cp .env.example .env
+# Edit .env — fill in LINEAR_API_KEY, LINEAR_TEAM_KEY, GIT_REPO_URL, GITHUB_TOKEN,
+# and your chosen API credentials (see Auth section below)
 ```
 
-The setup script writes your Linear API key and team key to `.env`, then optionally copies the scripts and Claude commands into an existing project.
-
-Once configured, run each agent in a separate terminal from your project root:
+**2. Build the image**
 
 ```bash
-./scripts/autonomous-agent-research.sh   # researches Todo tickets
-./scripts/autonomous-agent-plan.sh   # plans Research Pending Approval → Planning tickets
-./scripts/autonomous-agent-process.sh            # implements Plan Approved + Changes Required tickets
-./scripts/autonomous-agent-review.sh     # reviews In Review tickets
-./scripts/autonomous-agent-approve.sh    # merges Merging tickets
+docker compose build
 ```
 
-Each script accepts `--poll-interval <seconds>`, `--once` (process one ticket and exit), and `--reset` (clear the session cache).
+**3. Start agents**
+
+Run all five agents:
+
+```bash
+docker compose --profile all up -d
+```
+
+Or start individual agents:
+
+```bash
+docker compose --profile research up -d   # researches Todo tickets
+docker compose --profile plan up -d       # plans Research Pending Approval → Planning tickets
+docker compose --profile process up -d    # implements Plan Approved + Changes Required tickets
+docker compose --profile review up -d     # reviews Review Pending tickets
+docker compose --profile approve up -d    # merges Merging tickets
+```
+
+On first start each container clones `GIT_REPO_URL` fresh into `/workspace/repo`. Branches are pushed back to the remote — the host filesystem is never touched.
+
+## Auth
+
+Three credential modes are supported; the container auto-detects which to use:
+
+| Mode | How | Cost |
+|---|---|---|
+| **Claude subscription** (default) | Mount `~/.claude` from host (docker-compose.yml does this automatically) — no keys needed | Subscription |
+| **Anthropic API key** | Set `ANTHROPIC_API_KEY` in `.env` | Per token |
+| **OpenRouter** | Set `OPENROUTER_API_KEY` and `OR_MODEL` in `.env` | Per token |
+
+Priority order inside the container: `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` → `OPENROUTER_API_KEY`.
 
 ## Running in Parallel
 
-Multiple instances of each script can run concurrently against the same Linear team — per-ticket `mkdir` locks prevent two agents from processing the same ticket simultaneously.
-
-If an agent crashes mid-ticket, the stale lock directory must be removed manually before that ticket will be picked up again:
+Multiple containers of the same agent type can run concurrently — per-ticket `mkdir` locks prevent two agents from processing the same ticket simultaneously.
 
 ```bash
-rm -rf /tmp/research-lock-* /tmp/plan-lock-* /tmp/process-lock-* /tmp/review-lock-* /tmp/approve-lock-*
+# Run three process agents in parallel
+docker compose --profile process up -d --scale process=3
+```
+
+If an agent crashes mid-ticket, the stale lock directory must be removed before that ticket will be picked up again:
+
+```bash
+docker compose exec process rm -rf /tmp/process-lock-*
+# or for other agents:
+docker compose exec research rm -rf /tmp/research-lock-*
+docker compose exec plan     rm -rf /tmp/plan-lock-*
+docker compose exec review   rm -rf /tmp/review-lock-*
+docker compose exec approve  rm -rf /tmp/approve-lock-*
 ```
 
 ## CLAUDE.md
@@ -89,7 +125,31 @@ The agents run Claude CLI against your repo. Claude automatically loads your pro
 - Important directories and their purposes
 - Any project-specific rules the agent should follow
 
+Your host `~/.claude/CLAUDE.md` is also forwarded into the container and merged with the project-level file.
+
 A well-written `CLAUDE.md` dramatically improves implementation quality — the agent uses it to make technology-appropriate decisions without hallucinating your stack.
+
+## Logs
+
+Each agent writes structured session logs inside the container:
+
+```
+scripts/
+  autonomous-research-logs/agent.log
+  autonomous-plan-logs/agent.log
+  autonomous-process-logs/agent.log
+  autonomous-review-logs/agent.log
+  autonomous-approve-logs/agent.log
+```
+
+Follow live logs with Docker Compose:
+
+```bash
+docker compose logs -f process    # tail process agent
+docker compose logs -f            # tail all agents
+```
+
+Per-ticket raw Claude stream-json is written to the same directories with filenames like `TICKET-15-20260101-120000.log`. The stream-json log is parsed after each ticket to generate a per-phase summary printed to the terminal.
 
 ## What Each Command Does
 
@@ -157,27 +217,38 @@ Merges an approved ticket:
 
 ## Worktree Layout
 
-All worktrees live one level above your project root by default:
+All worktrees live inside the container's workspace:
 
 ```
-your-project/           # main repo
-../worktrees/
-  feat/TICKET-15/       # implementation + review worktree
-  feat/TICKET-16/
+/workspace/
+  repo/               # main clone (GIT_REPO_URL)
+  repo/../worktrees/
+    feat/TICKET-15/   # implementation + review worktree
+    feat/TICKET-16/
 ```
 
-The `wtp` helper manages this. If not installed, the scripts fall back to `git worktree add/remove` directly.
+Changes are committed and pushed to the remote — nothing is written to the host filesystem.
 
 ## Environment Variables
 
-| Variable | Source | Description |
-|---|---|---|
-| `LINEAR_API_KEY` | `.env` or shell env | Linear personal API key |
-| `LINEAR_TEAM_KEY` | `.env` or shell env | Linear team identifier (e.g. `ENG`) |
-| `TELEGRAM_BOT_TOKEN` | `.env` or shell env | Telegram bot token (from `@BotFather`) |
-| `TELEGRAM_CHAT_ID` | `.env` or shell env | Your Telegram chat or user ID |
+| Variable | Description |
+|---|---|
+| `GIT_REPO_URL` | Repository the container clones and works in (e.g. `https://github.com/org/repo.git`) |
+| `GIT_BASE_BRANCH` | Branch to clone from (default: `develop`) |
+| `GITHUB_TOKEN` | GitHub personal access token for HTTPS clone + push (needs `repo` + `workflow` scopes) |
+| `LINEAR_API_KEY` | Linear personal API key |
+| `LINEAR_TEAM_KEY` | Linear team identifier (e.g. `ENG`) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived Claude subscription token — from `claude setup-token` on host |
+| `ANTHROPIC_API_KEY` | Direct Anthropic API key |
+| `ANTHROPIC_BASE_URL` | Override API endpoint (e.g. a custom proxy) |
+| `OPENROUTER_API_KEY` | OpenRouter API key (routed through a local compatibility proxy) |
+| `OR_MODEL` | Model ID for OpenRouter (e.g. `deepseek/deepseek-r1`) |
+| `DOCKER_PLATFORM` | Docker build platform — `arm64` for Apple Silicon, `amd64` for Intel/AMD |
+| `DOCKER_TARGETARCH` | Matches `DOCKER_PLATFORM` — used for architecture-aware binary installs |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token (from `@BotFather`) — enables human-in-the-loop input |
+| `TELEGRAM_CHAT_ID` | Your Telegram chat or user ID |
 
-All variables can be set in the environment before running the scripts, or stored in `.env` (created by `setup.sh`).
+All variables are read from `.env` (copy from `.env.example`).
 
 ### Telegram setup (optional — enables human-in-the-loop input)
 
@@ -201,18 +272,3 @@ When an agent needs a decision it can't resolve from code, it sends the question
 - `all` — choose all options
 - `skip` — pass with no input
 - any other text — treated as a free-text answer
-
-## Logs
-
-Each agent writes structured session logs alongside the scripts:
-
-```
-scripts/
-  autonomous-research-logs/agent.log
-  autonomous-plan-logs/agent.log
-  autonomous-process-logs/agent.log
-  autonomous-review-logs/agent.log
-  autonomous-approve-logs/agent.log
-```
-
-Per-ticket raw Claude stream-json is written to the same directories with filenames like `TICKET-15-20260101-120000.log`. The stream-json log is parsed after each ticket to generate a per-phase summary printed to the terminal.

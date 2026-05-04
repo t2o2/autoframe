@@ -272,7 +272,7 @@ Walk through **every acceptance criterion** that has a visible outcome. For each
   ```bash
   # Downscale to max 1200px on longest side (keeps file under ~150KB)
   sips -Z 1200 "${PROOF_DIR}/step-N-[description].jpg"
-  SCREENSHOT_B64=$(base64 -i "${PROOF_DIR}/step-N-[description].jpg")
+  SCREENSHOT_B64=$(base64 "${PROOF_DIR}/step-N-[description].jpg")
   ```
 
   Then call `mcp__linear-server__create_attachment`:
@@ -330,7 +330,7 @@ Capture proof for:
 **Upload each JSON response as a Linear attachment:**
 
 ```bash
-API_B64=$(base64 -i "${PROOF_DIR}/api-proof-[criterion]-happy.json")
+API_B64=$(base64 "${PROOF_DIR}/api-proof-[criterion]-happy.json")
 ```
 
 Then call `mcp__linear-server__create_attachment`:

@@ -21,10 +21,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$SCRIPT_DIR/autonomous-approve-logs"
 PROCESSED_FILE="/tmp/autonomous-approve-processed.txt"
 
-# Load LINEAR_API_KEY from .env if not already set
+# Load LINEAR_API_KEY and LINEAR_TEAM_KEY from .env if not already set
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [[ -z "${LINEAR_API_KEY:-}" && -f "$REPO_ROOT/.env" ]]; then
     LINEAR_API_KEY="$(grep -E '^LINEAR_API_KEY=' "$REPO_ROOT/.env" | cut -d= -f2 | cut -d' ' -f1)"
+fi
+if [[ -z "${LINEAR_TEAM_KEY:-}" && -f "$REPO_ROOT/.env" ]]; then
+    LINEAR_TEAM_KEY="$(grep -E '^LINEAR_TEAM_KEY=' "$REPO_ROOT/.env" | cut -d= -f2 | cut -d' ' -f1)"
 fi
 
 POLL_INTERVAL=60
@@ -73,7 +76,7 @@ Usage: python3 <script> <ticket_id>
 """
 import sys, json, re, os
 
-ticket_id = sys.argv[1] if len(sys.argv) > 1 else "GYL-?"
+ticket_id = sys.argv[1] if len(sys.argv) > 1 else "TICKET-?"
 heartbeat_file = sys.argv[2] if len(sys.argv) > 2 else None
 
 R  = '\033[0m'
@@ -271,7 +274,7 @@ print(n[0]['id'] if n else '')
     states_resp=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d '{"query":"{ teams(filter:{key:{eq:\"GYL\"}}) { nodes { states { nodes { id name } } } } }"}' \
+        -d "{\"query\":\"{ teams(filter:{key:{eq:\\\"${LINEAR_TEAM_KEY}\\\"}}) { nodes { states { nodes { id name } } } } }\"}" \
         https://api.linear.app/graphql 2>/dev/null) || return 1
     state_id=$(python3 -c "
 import json,sys
@@ -482,7 +485,7 @@ fetch_merging_tickets() {
     response=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d '{"query":"{ issues(filter:{team:{key:{eq:\"GYL\"}},state:{name:{eq:\"Merging\"}}}) { nodes { identifier } } }"}' \
+        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${LINEAR_TEAM_KEY}\\\"}},state:{name:{eq:\\\"Merging\\\"}}}){ nodes { identifier } } }\"}" \
         https://api.linear.app/graphql 2>/dev/null)
 
     if [[ $? -ne 0 || -z "$response" ]]; then
@@ -505,7 +508,7 @@ print('\n'.join(ids) if ids else 'NONE')
 }
 
 parse_ticket_ids() {
-    echo "$1" | grep -oE 'GYL-[0-9]+' | sort -t- -k2 -n | uniq
+    echo "$1" | grep -oE "${LINEAR_TEAM_KEY}-[0-9]+" | sort -t- -k2 -n | uniq
 }
 
 is_processed()     { grep -qxF "$1" "$PROCESSED_FILE" 2>/dev/null; }
@@ -516,7 +519,7 @@ unmark_processed() { sed -i '' "/^${1}$/d" "$PROCESSED_FILE" 2>/dev/null || true
 # Called at the start of each poll cycle so stale entries don't block re-processing.
 prune_cache() {
     local cached
-    cached=$(cat "$PROCESSED_FILE" 2>/dev/null | grep -oE 'GYL-[0-9]+' || true)
+    cached=$(cat "$PROCESSED_FILE" 2>/dev/null | grep -oE "${LINEAR_TEAM_KEY}-[0-9]+" || true)
     [[ -z "$cached" ]] && return
 
     while IFS= read -r tid; do

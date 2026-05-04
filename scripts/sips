@@ -1,0 +1,25 @@
+#!/bin/bash
+# Linux shim for macOS 'sips' image processing tool.
+# Supports the subset used by autoframe ticket commands: sips -Z <maxdim> <file>
+# Maps to ImageMagick's convert for in-place resize (longest side ≤ maxdim).
+
+size=""
+file=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -Z) size="$2"; shift 2 ;;
+        --*)        shift 2 ;;   # skip other flags we don't need
+        -*)         shift   ;;
+        *)  file="$1"; shift ;;
+    esac
+done
+
+if [[ -z "$file" ]]; then
+    echo "sips: no input file specified" >&2
+    exit 1
+fi
+
+if [[ -n "$size" ]]; then
+    convert -resize "${size}x${size}>" "$file" "$file"
+fi

@@ -212,36 +212,65 @@ cd "${WORKTREE}/frontend-issuance" && pnpm dev &
 sleep 10
 ```
 
-Use Chrome DevTools MCP:
+Use **agent-browser** for all UI validation. Load the core workflow guide first:
 
-1. `mcp__chrome-devtools__new_page` — open fresh tab
-2. `mcp__chrome-devtools__resize_page` → `width: 1280, height: 800` — **MUST happen before navigate** so the page renders at this viewport from the start (doing it after causes blank-fill bugs)
-3. `mcp__chrome-devtools__navigate_page` → `http://localhost:8105`
-4. `mcp__chrome-devtools__list_console_messages` — capture baseline (no pre-existing errors)
+```bash
+agent-browser skills get core
+```
+
+**Start recording before any browser action — captures the full testing session:**
+
+```bash
+RECORDING="${PROOF_DIR}/review-recording.webm"
+agent-browser record start "${RECORDING}"
+```
+
+**Open the app and capture a baseline:**
+
+```bash
+agent-browser open http://localhost:8105
+agent-browser wait --load networkidle
+agent-browser snapshot -i
+```
 
 Walk through **every acceptance criterion**. For each step:
 
-- Perform the action (click, submit, navigate)
-- `mcp__chrome-devtools__take_screenshot` with `format: "jpeg"`, `quality: 70` → `${PROOF_DIR}/step-N-[criterion-slug].jpg`
-- `mcp__chrome-devtools__list_console_messages` — confirm no new console errors
-- **Compress and upload to Linear, record the returned URL:**
+- Perform the action using agent-browser (`click @eN`, `fill @eN "value"`, etc.)
+- Re-snapshot after any navigation or dynamic change: `agent-browser snapshot -i`
+- Pause for visual clarity before capturing: `agent-browser wait 500`
+- Capture screenshot: `agent-browser screenshot "${PROOF_DIR}/step-N-[criterion-slug].png"`
+- Check console: `agent-browser get console`
 
-  ```bash
-  # Downscale to max 1200px on longest side (keeps file under ~150KB)
-  sips -Z 1200 "${PROOF_DIR}/step-N-[criterion-slug].jpg"
-  SCREENSHOT_B64=$(base64 -i "${PROOF_DIR}/step-N-[criterion-slug].jpg")
-  ```
+**Convert PNG screenshots to JPEG and upload each to Linear:**
 
-  Call `mcp__linear-server__create_attachment`:
+```bash
+# Convert PNG to JPEG and downscale to max 1200px (keeps file under ~150KB)
+sips -s format jpeg -Z 1200 "${PROOF_DIR}/step-N-[criterion-slug].png" \
+  --out "${PROOF_DIR}/step-N-[criterion-slug].jpg"
+SCREENSHOT_B64=$(base64 "${PROOF_DIR}/step-N-[criterion-slug].jpg")
+```
 
-  - `issue`: `{{ARGUMENTS}}`
-  - `base64Content`: base64 string above
-  - `filename`: `step-N-[criterion-slug].jpg`
-  - `contentType`: `image/jpeg`
-  - `title`: `[Review] [Step N] [Short description]`
-  - `subtitle`: `{{ARGUMENTS}} — review proof`
+Call `mcp__claude_ai_Linear__create_attachment`:
 
-  **Record the `url` returned by each `create_attachment` call.** These hosted URLs are embedded as inline markdown images in the Phase 6 review comment so reviewers see visual previews directly in Linear (not just sidebar download links).
+- `issue`: `{{ARGUMENTS}}`
+- `base64Content`: base64 string above
+- `filename`: `step-N-[criterion-slug].jpg`
+- `contentType`: `image/jpeg`
+- `title`: `[Review] [Step N] [Short description]`
+- `subtitle`: `{{ARGUMENTS}} — review proof`
+
+**Record the `url` returned by each `create_attachment` call.** These hosted URLs are embedded as inline markdown images in the Phase 6 review comment so reviewers see visual previews directly in Linear (not just sidebar download links).
+
+**Stop recording and store it with the ticket artifact:**
+
+```bash
+agent-browser record stop
+
+# Store alongside review.md so it can be watched without re-running the env
+mkdir -p "thoughts/tickets/{{ARGUMENTS}}"
+cp "${RECORDING}" "thoughts/tickets/{{ARGUMENTS}}/review-recording.webm"
+echo "Recording saved: thoughts/tickets/{{ARGUMENTS}}/review-recording.webm"
+```
 
 **Minimum required screenshots (all must be uploaded):**
 
@@ -255,13 +284,13 @@ Walk through **every acceptance criterion**. For each step:
 If `http://localhost:8105` is unreachable after attempting to start it — **this is a FAIL**:
 > "Browser validation failed — frontend could not be started. Blocking review."
 
-If the Chrome DevTools MCP tool fails or returns an error (e.g. "browser connection unavailable", "no page found") — **do not skip screenshots**. Instead:
+If `agent-browser open` fails or returns a connection error:
 
-1. Try `mcp__chrome-devtools__new_page` to open a fresh browser context and retry
-2. If that also fails, **this is a FAIL** — report it explicitly and move to Changes Required:
-   > "Browser validation failed — Chrome DevTools MCP unavailable. Cannot capture visual proof. Blocking review."
+1. Run `agent-browser close --all` then retry `agent-browser open http://localhost:8105`
+2. If that also fails — stop the recording, report it explicitly, and move to Changes Required:
+   > "Browser validation failed — agent-browser could not connect. Cannot capture visual proof. Blocking review."
 
-**Never give PASS for a UI ticket without at least one screenshot uploaded to Linear.** Browser MCP failure is a blocking condition, not a reason to bypass the proof requirement.
+**Never give PASS for a UI ticket without at least one screenshot uploaded to Linear.** Browser failure is a blocking condition, not a reason to bypass the proof requirement.
 
 Do **not** proceed to Phase 6 without resolving it or marking FAIL.
 
@@ -292,7 +321,7 @@ For Starfish-proxied endpoints requiring HMAC auth, use the demo credentials fro
 **Upload each JSON file to Linear:**
 
 ```bash
-API_B64=$(base64 -i "${PROOF_DIR}/api-[criterion-slug]-happy.json")
+API_B64=$(base64 "${PROOF_DIR}/api-[criterion-slug]-happy.json")
 ```
 
 Call `mcp__linear-server__create_attachment`:
@@ -425,6 +454,9 @@ Build the review comment. Post via `mcp__linear-server__save_comment`. Every sec
 | 3 | `step-3-error-state.jpg` | [description] |
 
 **Console errors found:** [none / list exact error text]
+
+**UI testing session recording:** `thoughts/tickets/{{ARGUMENTS}}/review-recording.webm`
+*(Play locally with any media player — full session, no re-running the environment needed)*
 
 **API responses** (backend tickets — full JSON inline):
 
@@ -646,10 +678,11 @@ Phase 4: Tests [parallel where independent]
                          ▼
 Phase 5: Visual Proof [MANDATORY — no skip]
   ┌──────────────────────────────────────────────────┐
-  │ UI tickets:                                      │
-  │   new_page → navigate :8105                      │
-  │   take_screenshot jpeg q70 per criterion         │
-  │   base64 → create_attachment → record url        │
+  │ UI tickets (agent-browser + recording):           │
+  │   record start → review-recording.webm           │
+  │   open :8105 → snapshot → walk criteria          │
+  │   screenshot PNG→JPEG sips → create_attachment   │
+  │   record stop → thoughts/tickets/GYL-XX/         │
   │   → /tmp/screenshots/GYL-XX-review/step-N-*.jpg  │
   │                                                  │
   │ API/backend tickets:                             │

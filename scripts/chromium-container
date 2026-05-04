@@ -1,0 +1,4 @@
+#!/bin/bash
+# Container wrapper for Chromium — adds flags required when running in Docker
+# (kernel restricts setuid sandboxing; --no-sandbox is the supported workaround)
+exec /usr/bin/chromium --no-sandbox --disable-dev-shm-usage --disable-gpu "$@"
