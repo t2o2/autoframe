@@ -11,6 +11,8 @@ x-agent-base: &agent-base
       TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
   platform: linux/${DOCKER_PLATFORM:-arm64}
   working_dir: /workspace/repo
+  env_file:
+    - .env
   volumes:
     # Claude auth and commands — read-only from host
     - ${HOME}/.claude.json:/opt/host-claude.json:ro

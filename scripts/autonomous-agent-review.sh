@@ -232,11 +232,13 @@ HEARTBEAT_PID=""
 
 start_heartbeat() {
     local ticket_id="$1"
+    local hb_file="${2:-}"
     (
         local elapsed=0
         while true; do
             sleep "$HEARTBEAT_INTERVAL"
             elapsed=$((elapsed + HEARTBEAT_INTERVAL))
+            [[ -n "$hb_file" && -f "$hb_file" ]] && touch "$hb_file"
             printf "${DIM}[$(date '+%H:%M:%S')] ⏳  Still reviewing ${BOLD}%s${RESET}${DIM}... %dm%ds elapsed${RESET}\n" \
                 "$ticket_id" $((elapsed / 60)) $((elapsed % 60))
         done
@@ -254,7 +256,7 @@ stop_heartbeat() {
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────
 
-STALE_THRESHOLD=1800   # 30 minutes — no stream output → revert
+STALE_THRESHOLD=1800   # 30 minutes alive-but-silent → revert; dead pipeline caught by kill -0 within 60s
 STALE_WATCHDOG_PID=""
 STATUS_WATCHER_PID=""
 
@@ -323,11 +325,19 @@ start_stale_watchdog() {
         while [[ -f "$hb_file" ]]; do
             sleep 60
             [[ ! -f "$hb_file" ]] && exit 0
+            # Crashed pipeline: revert immediately without waiting for the heartbeat timeout
+            if ! kill -0 "$pipe_pid" 2>/dev/null; then
+                printf "${YELLOW}[$(date '+%H:%M:%S')] ⚠  %s pipeline exited — reverting to '%s'${RESET}\n" \
+                    "$ticket_id" "$revert_state"
+                revert_ticket_status "$ticket_id" "$revert_state"
+                rm -f "$hb_file"
+                exit 0
+            fi
             local mtime age
-            mtime=$(stat -f %m "$hb_file" 2>/dev/null) || exit 0
+            mtime=$(python3 -c "import os,sys; print(int(os.path.getmtime(sys.argv[1])))" "$hb_file" 2>/dev/null) || exit 0
             age=$(( $(date +%s) - mtime ))
             if (( age > STALE_THRESHOLD )); then
-                printf "${YELLOW}[$(date '+%H:%M:%S')] ⚠  %s inactive %ds — reverting to '%s'${RESET}\n" \
+                printf "${YELLOW}[$(date '+%H:%M:%S')] ⚠  %s silent %ds (process alive) — reverting to '%s'${RESET}\n" \
                     "$ticket_id" "$age" "$revert_state"
                 revert_ticket_status "$ticket_id" "$revert_state"
                 rm -f "$hb_file"
@@ -396,7 +406,7 @@ revert_stale_claims() {
         [[ -f "$hb" ]] || continue
         ticket_id=$(basename "$hb" .txt | sed "s/${hb_prefix}-heartbeat-//")
         revert_state=$(cat "$hb" 2>/dev/null) || continue
-        mtime=$(stat -f %m "$hb" 2>/dev/null) || continue
+        mtime=$(python3 -c "import os,sys; print(int(os.path.getmtime(sys.argv[1])))" "$hb" 2>/dev/null) || continue
         age=$(( $(date +%s) - mtime ))
         if (( age > STALE_THRESHOLD )); then
             log WARN "Stale claim: $ticket_id (${age}s old, revert→'$revert_state')"
@@ -661,7 +671,7 @@ review_ticket() {
     divider
     echo ""
 
-    start_heartbeat "$ticket_id"
+    start_heartbeat "$ticket_id" "$HB_FILE"
 
     (
         claude --dangerously-skip-permissions \

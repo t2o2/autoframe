@@ -31,17 +31,17 @@ _start_openrouter_proxy() {
 
 if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
     # Claude Code reads this env var directly — no extra config needed.
-    AUTH_MODE="oauth_token"
+    export AUTH_MODE="oauth_token"
     echo "[entrypoint] Using CLAUDE_CODE_OAUTH_TOKEN (Claude subscription)"
 elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-    AUTH_MODE="apikey"
+    export AUTH_MODE="apikey"
     echo "[entrypoint] Using Anthropic API key"
 elif [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
     export ANTHROPIC_API_KEY="$OPENROUTER_API_KEY"
     _start_openrouter_proxy
 else
     echo "[entrypoint] WARNING: no credentials configured" >&2
-    AUTH_MODE="none"
+    export AUTH_MODE="none"
 fi
 
 # ── 1. Git credentials ───────────────────────────────────────────────────────
