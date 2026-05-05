@@ -256,7 +256,8 @@ stop_heartbeat() {
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────
 
-STALE_THRESHOLD=1800   # 30 minutes alive-but-silent → revert; dead pipeline caught by kill -0 within 60s
+STALE_THRESHOLD=1800        # 30 minutes alive-but-silent → revert; dead pipeline caught by kill -0 within 60s
+LINEAR_STALE_THRESHOLD=3600 # 60 minutes without a Linear update → ticket stalled across container boundary
 STALE_WATCHDOG_PID=""
 STATUS_WATCHER_PID=""
 
@@ -417,6 +418,47 @@ revert_stale_claims() {
             log INFO "Active claim file found: $ticket_id (${age}s, within threshold)"
         fi
     done
+}
+
+# Revert tickets stuck in an intermediate Linear state — catches crashes across container restarts.
+revert_stale_linear_claims() {
+    local stuck_state="$1"
+    local revert_state="$2"
+    local lock_prefix="$3"
+    [[ -z "${LINEAR_API_KEY:-}" ]] && return
+    local response
+    response=$(curl -sf \
+        -H "Authorization: ${LINEAR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${LINEAR_TEAM_KEY}\\\"}},state:{name:{eq:\\\"${stuck_state}\\\"}}}){ nodes { identifier updatedAt } } }\"}" \
+        https://api.linear.app/graphql 2>/dev/null) || return
+    local stale_tickets
+    stale_tickets=$(python3 -c "
+import json, sys, time
+from datetime import datetime, timezone
+stale = int(sys.argv[1])
+data = json.loads(sys.stdin.read())
+nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
+now = time.time()
+for n in nodes:
+    updated = n.get('updatedAt', '')
+    if not updated:
+        continue
+    dt = datetime.fromisoformat(updated.replace('Z', '+00:00'))
+    age = int(now - dt.timestamp())
+    if age > stale:
+        print(n['identifier'], age)
+" "$LINEAR_STALE_THRESHOLD" <<< "$response" 2>/dev/null) || return
+    [[ -z "$stale_tickets" ]] && return
+    while IFS=' ' read -r ticket_id age; do
+        [[ -z "$ticket_id" ]] && continue
+        if [[ -d "/tmp/${lock_prefix}-lock-${ticket_id}" ]]; then
+            log INFO "  $ticket_id in '${stuck_state}' — locally locked, active"
+            continue
+        fi
+        log WARN "  $ticket_id stuck in '${stuck_state}' (${age}s since last update) — reverting to '${revert_state}'"
+        revert_ticket_status "$ticket_id" "$revert_state"
+    done <<< "$stale_tickets"
 }
 
 # ── Phase summary ─────────────────────────────────────────────────────────────
@@ -881,6 +923,7 @@ main() {
     while true; do
         cycle=$((cycle + 1))
         revert_stale_claims "review" "review"
+        revert_stale_linear_claims "In Review" "Review Pending" "review"
         log INFO "Poll #${cycle} — $(date '+%Y-%m-%d %H:%M:%S')"
 
         local raw; raw=$(fetch_review_tickets)
