@@ -1,5 +1,3 @@
-version: '3.9'
-
 # Each container clones GIT_REPO_URL fresh into /workspace/repo and works
 # entirely within that clone — host code is never mounted. Branches are pushed
 # back to the remote; the host and container codebases never interfere.
