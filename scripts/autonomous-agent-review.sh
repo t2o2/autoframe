@@ -739,6 +739,7 @@ review_ticket() {
     stop_status_watcher
     stop_stale_watchdog
     rm -f "$HB_FILE"
+    rmdir "$lock_dir" 2>/dev/null || true
 
     stop_heartbeat
 

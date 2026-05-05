@@ -68,7 +68,11 @@ mkdir -p /workspace
 
 if [[ -d "$WORKSPACE/.git" ]]; then
     echo "[entrypoint] Repo already present — fetching latest"
-    git -C "$WORKSPACE" fetch --all --prune
+    git -C "$WORKSPACE" fetch --all --prune 2>&1 || {
+        echo "[entrypoint] fetch had ref errors — repacking and retrying"
+        git -C "$WORKSPACE" pack-refs --all
+        git -C "$WORKSPACE" fetch --all --prune 2>&1 || true
+    }
     git -C "$WORKSPACE" checkout "$BASE_BRANCH"
     git -C "$WORKSPACE" pull --ff-only
 else

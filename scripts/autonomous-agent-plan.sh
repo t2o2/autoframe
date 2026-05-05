@@ -599,6 +599,7 @@ process_ticket() {
     stop_status_watcher
     stop_stale_watchdog
     rm -f "$HB_FILE"
+    rmdir "$lock_dir" 2>/dev/null || true
 
     # Post-exit revert: if ticket still in claimed state, revert it
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
