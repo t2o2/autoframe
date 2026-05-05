@@ -263,11 +263,12 @@ STATUS_WATCHER_PID=""
 
 get_ticket_state() {
     local ticket_id="$1"
+    local team_key="${ticket_id%-*}" issue_num="${ticket_id#*-}"
     [[ -z "${LINEAR_API_KEY:-}" ]] && echo "" && return
     curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { state { name } } } }\"}" \
+        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${team_key}\\\"}},number:{eq:${issue_num}}}) { nodes { state { name } } } }\"}" \
         https://api.linear.app/graphql 2>/dev/null \
     | python3 -c "
 import json,sys
@@ -279,13 +280,14 @@ print(n[0]['state']['name'] if n else '')
 
 revert_ticket_status() {
     local ticket_id="$1"
+    local team_key="${ticket_id%-*}" issue_num="${ticket_id#*-}"
     local target_state="$2"
     [[ -z "${LINEAR_API_KEY:-}" ]] && return 1
     local issue_resp uuid states_resp state_id
     issue_resp=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { id } } }\"}" \
+        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${team_key}\\\"}},number:{eq:${issue_num}}}) { nodes { id } } }\"}" \
         https://api.linear.app/graphql 2>/dev/null) || return 1
     uuid=$(python3 -c "
 import json,sys
@@ -592,6 +594,7 @@ mark_processed() { echo "$1" >> "$PROCESSED_FILE"; }
 
 ticket_still_actionable() {
     local ticket_id="$1"
+    local team_key="${ticket_id%-*}" issue_num="${ticket_id#*-}"
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         return 1
@@ -601,7 +604,7 @@ ticket_still_actionable() {
     response=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { state { name } } } }\"}" \
+        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${team_key}\\\"}},number:{eq:${issue_num}}}) { nodes { state { name } } } }\"}" \
         https://api.linear.app/graphql 2>/dev/null)
 
     local state_name
@@ -692,6 +695,7 @@ run_build_check() {
 
 review_ticket() {
     local ticket_id="$1"
+    local team_key="${ticket_id%-*}" issue_num="${ticket_id#*-}"
     local log_file="$LOG_DIR/${ticket_id}-$(date '+%Y%m%d-%H%M%S').log"
     local exit_code=0
 
@@ -799,7 +803,7 @@ PYEOF
                 ticket_gql_id=$(curl -sf \
                     -H "Authorization: ${LINEAR_API_KEY}" \
                     -H "Content-Type: application/json" \
-                    -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { id } } }\"}" \
+                    -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${team_key}\\\"}},number:{eq:${issue_num}}}) { nodes { id } } }\"}" \
                     https://api.linear.app/graphql 2>/dev/null \
                     | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data']['issues']['nodes'][0]['id'])" 2>/dev/null || true)
 

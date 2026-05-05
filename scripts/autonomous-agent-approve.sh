@@ -242,11 +242,12 @@ STATUS_WATCHER_PID=""
 
 get_ticket_state() {
     local ticket_id="$1"
+    local team_key="${ticket_id%-*}" issue_num="${ticket_id#*-}"
     [[ -z "${LINEAR_API_KEY:-}" ]] && echo "" && return
     curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { state { name } } } }\"}" \
+        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${team_key}\\\"}},number:{eq:${issue_num}}}) { nodes { state { name } } } }\"}" \
         https://api.linear.app/graphql 2>/dev/null \
     | python3 -c "
 import json,sys
@@ -258,13 +259,14 @@ print(n[0]['state']['name'] if n else '')
 
 revert_ticket_status() {
     local ticket_id="$1"
+    local team_key="${ticket_id%-*}" issue_num="${ticket_id#*-}"
     local target_state="$2"
     [[ -z "${LINEAR_API_KEY:-}" ]] && return 1
     local issue_resp uuid states_resp state_id
     issue_resp=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { id } } }\"}" \
+        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${team_key}\\\"}},number:{eq:${issue_num}}}) { nodes { id } } }\"}" \
         https://api.linear.app/graphql 2>/dev/null) || return 1
     uuid=$(python3 -c "
 import json,sys
@@ -545,6 +547,7 @@ prune_cache() {
 
 ticket_still_merging() {
     local ticket_id="$1"
+    local team_key="${ticket_id%-*}" issue_num="${ticket_id#*-}"
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         # No API key — assume still merging to avoid false cache
@@ -555,7 +558,7 @@ ticket_still_merging() {
     response=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"query\":\"{ issues(filter:{identifier:{eq:\\\"${ticket_id}\\\"}}) { nodes { state { name } } } }\"}" \
+        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${team_key}\\\"}},number:{eq:${issue_num}}}) { nodes { state { name } } } }\"}" \
         https://api.linear.app/graphql 2>/dev/null)
 
     # If curl failed or returned empty, assume still merging to avoid false cache
