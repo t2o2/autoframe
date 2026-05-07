@@ -28,6 +28,13 @@ BRANCH="${BRANCH_TYPE}/${TICKET}"   # e.g. feat/GYL-15
 WORKTREE="../worktrees/${BRANCH}"   # e.g. ../worktrees/feat/GYL-15
 ```
 
+Pull the latest base branch from remote before branching (ensures the worktree starts from current code, not stale local state):
+
+```bash
+BASE_BRANCH="${GIT_BASE_BRANCH:-develop}"
+git fetch origin "$BASE_BRANCH"
+```
+
 Check if worktree already exists (idempotent — supports resuming interrupted work):
 
 ```bash
@@ -35,7 +42,7 @@ if wtp ls 2>/dev/null | grep -q "${BRANCH}"; then
   echo "Resuming existing worktree for ${BRANCH}"
   # Worktree already exists — continue from where work left off
 else
-  wtp add -b "${BRANCH}"
+  wtp add -b "${BRANCH}" "origin/${BASE_BRANCH}"
   echo "Created worktree at ${WORKTREE}"
 fi
 ```
@@ -473,7 +480,8 @@ In Progress     →  Done             (Phase 6, self-contained)
 /ticket-process GYL-XX
         │
         ▼
-Phase 0: wtp add -b feat/GYL-XX
+Phase 0: git fetch origin develop
+         wtp add -b feat/GYL-XX origin/develop
   → ../worktrees/feat/GYL-XX (isolated, managed by wtp)
         │
         ▼
