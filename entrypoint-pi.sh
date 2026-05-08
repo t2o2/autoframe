@@ -105,6 +105,21 @@ cat > "${PI_AGENT_DIR}/settings.json" <<'JSON'
 JSON
 echo "[entrypoint] Pi agent settings.json written (container-safe package list)"
 
+# Always write models.json — caps context window to 200K for all Anthropic models.
+cat > "${PI_AGENT_DIR}/models.json" <<'JSON'
+{
+  "providers": {
+    "anthropic": {
+      "modelOverrides": {
+        "claude-sonnet-4-6": { "contextWindow": 200000 },
+        "claude-opus-4-7":  { "contextWindow": 200000 }
+      }
+    }
+  }
+}
+JSON
+echo "[entrypoint] Pi agent models.json written (200K context cap)"
+
 # ── 3. Auth: OAuth token ─────────────────────────────────────────────────────
 # auth.json holds the Anthropic OAuth refresh+access tokens.
 # Priority: dedicated auth.json mount > copied from host pi dir > ANTHROPIC_API_KEY fallback.
