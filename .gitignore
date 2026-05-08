@@ -1,6 +1,7 @@
 # Agent credentials — never commit
 .auto-claude/.env
 .env
+.env.project
 
 # Session logs (large, local-only)
 scripts/autonomous-agent-logs/
