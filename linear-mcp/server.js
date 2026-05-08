@@ -125,15 +125,17 @@ async function createAttachment({ issueId, title, url, base64Content, contentTyp
 
     // Step 1: request presigned upload URL
     const uploadData = await gql(`
-      query FileUpload($contentType: String!, $size: Int!, $filename: String) {
+      mutation FileUpload($contentType: String!, $size: Int!, $filename: String!) {
         fileUpload(contentType: $contentType, size: $size, filename: $filename) {
-          uploadUrl
-          assetUrl
-          headers { key value }
+          uploadFile {
+            uploadUrl
+            assetUrl
+            headers { key value }
+          }
         }
       }`, { contentType: ct, size: buf.byteLength, filename: fn });
 
-    const { uploadUrl, assetUrl: returnedAsset, headers } = uploadData.fileUpload;
+    const { uploadUrl, assetUrl: returnedAsset, headers } = uploadData.fileUpload.uploadFile;
 
     // Step 2: PUT the file
     const uploadHeaders = { 'Content-Type': ct, 'Content-Length': String(buf.byteLength) };
