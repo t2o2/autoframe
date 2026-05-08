@@ -87,6 +87,50 @@ services:
     environment:
       - AGENT_TIER=normal
 
+  # ── Pi test service ────────────────────────────────────────────────────────
+  # Small-scale test: one process agent using pi instead of claude.
+  # Run with: docker compose --profile process-pi up
+  # Add --once flag to process a single ticket and exit.
+  process-pi:
+    build:
+      context: .
+      dockerfile: Dockerfile.pi
+      args:
+        TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
+    platform: linux/${DOCKER_PLATFORM:-arm64}
+    container_name: agent-process-pi
+    working_dir: /workspace/repo
+    command: ["./scripts/autonomous-agent-process-pi.sh", "--once"]
+    profiles: ["process-pi"]
+    env_file:
+      - path: .env
+        required: true
+      - path: .env.project
+        required: false
+    volumes:
+      # Pi OAuth auth — read-only; copied into container at startup
+      - ${HOME}/.pi/agent/auth.json:/opt/host-pi-auth.json:ro
+      # Full host pi config (settings, extensions, agents, skills)
+      - ${HOME}/.pi/agent:/opt/host-pi:ro
+      # SSH key for git (optional)
+      # - ${HOME}/.ssh:/home/agent/.ssh:ro
+      # Persistent Rust build cache
+      - cargo_target:/cache/cargo_target
+    environment:
+      - GIT_REPO_URL
+      - GIT_BASE_BRANCH
+      - GITHUB_TOKEN
+      - LINEAR_API_KEY
+      - LINEAR_TEAM_KEY
+      - AGENT_TIER=normal
+      - HOME=/home/agent
+      - CARGO_TARGET_DIR=/cache/cargo_target
+      - RUST_LOG=${RUST_LOG:-info}
+    restart: "no"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "cdn.growthbook.io:127.0.0.1"
+
 volumes:
   cargo_target:
     name: autoframe_cargo_target
