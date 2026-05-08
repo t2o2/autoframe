@@ -101,16 +101,15 @@ echo "[entrypoint] Workspace ready at $WORKSPACE"
 
 # ── 3. Bootstrap ~/.claude from host config ──────────────────────────────────
 # Host ~/.claude is staged at /opt/host-claude (read-only).
+# Copy everything so skills, commands, hooks, agents, memory, config, etc. are
+# all available — then immediately reset credentials so auth goes through env vars.
 mkdir -p "${HOME}/.claude"
-for _f in settings.json settings.local.json CLAUDE.md; do
-    [[ -f "/opt/host-claude/$_f" ]] && cp "/opt/host-claude/$_f" "${HOME}/.claude/$_f"
-done
-for _d in memory skills agents plugins commands; do
-    [[ -d "/opt/host-claude/$_d" ]] && cp -r "/opt/host-claude/$_d" "${HOME}/.claude/$_d"
-done
+# Copy everything from host .claude; ignore permission errors on git pack files
+# inside plugin marketplace repos (they're not needed for Claude Code operation).
+cp -r /opt/host-claude/. "${HOME}/.claude/" 2>/dev/null || true
 # Always blank credentials.json — Claude Code reads the key from ANTHROPIC_API_KEY.
 echo '{"version":1}' > "${HOME}/.claude/credentials.json"
-echo "[entrypoint] ~/.claude bootstrapped"
+echo "[entrypoint] ~/.claude bootstrapped (full copy from /opt/host-claude)"
 
 # ── 4. Patch ~/.claude.json ──────────────────────────────────────────────────
 cp /opt/host-claude.json "${HOME}/.claude.json"

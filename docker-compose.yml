@@ -10,7 +10,10 @@ x-agent-base: &agent-base
   platform: linux/${DOCKER_PLATFORM:-arm64}
   working_dir: /workspace/repo
   env_file:
-    - .env
+    - path: .env
+      required: true
+    - path: .env.project
+      required: false
   volumes:
     # Claude auth and commands — read-only from host
     - ${HOME}/.claude.json:/opt/host-claude.json:ro
@@ -58,7 +61,7 @@ services:
     command: ["./scripts/autonomous-agent-review.sh"]
     profiles: ["review", "all"]
     environment:
-      - AGENT_TIER=advanced
+      - AGENT_TIER=normal
 
   approve:
     <<: *agent-base
@@ -82,7 +85,7 @@ services:
     command: ["./scripts/autonomous-agent-plan.sh"]
     profiles: ["plan", "all"]
     environment:
-      - AGENT_TIER=advanced
+      - AGENT_TIER=normal
 
 volumes:
   cargo_target:
