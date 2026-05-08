@@ -1,4 +1,4 @@
-FROM node:22-bookworm
+FROM node:22-bookworm-slim
 
 # Architecture mapping: docker arm64 → wtp arm64, docker amd64 → wtp x86_64
 ARG TARGETARCH
@@ -36,10 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # pnpm
-RUN npm install -g pnpm@10.28.0
+RUN npm install -g pnpm@10.28.0 && npm cache clean --force
 
 # Claude CLI + agent-browser (skills are bundled in the package — no runtime download needed)
-RUN npm install -g @anthropic-ai/claude-code agent-browser@0.26.0
+RUN npm install -g @anthropic-ai/claude-code agent-browser@0.26.0 && npm cache clean --force
 
 # wtp — architecture-aware installation
 RUN case "${TARGETARCH}" in \
@@ -91,7 +91,11 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
       --default-toolchain 1.95.0 \
       --profile minimal \
       --no-modify-path && \
-    /home/agent/.cargo/bin/rustup component add rustfmt clippy --toolchain 1.95.0
+    /home/agent/.cargo/bin/rustup component add rustfmt clippy --toolchain 1.95.0 && \
+    rm -rf /home/agent/.rustup/toolchains/*/share/doc \
+           /home/agent/.rustup/toolchains/*/share/man \
+           /home/agent/.rustup/tmp \
+           /home/agent/.rustup/downloads
 
 ENV PATH="/home/agent/.cargo/bin:$PATH"
 
