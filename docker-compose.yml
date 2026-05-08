@@ -101,7 +101,7 @@ services:
     container_name: agent-process-pi
     working_dir: /workspace/repo
     command: ["./scripts/autonomous-agent-process-pi.sh", "--once"]
-    profiles: ["process-pi"]
+    profiles: ["process-pi", "all-pi"]
     env_file:
       - path: .env
         required: true
