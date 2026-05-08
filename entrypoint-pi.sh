@@ -70,14 +70,40 @@ done
 echo "[entrypoint] Workspace ready at $WORKSPACE"
 
 # ── 2. Bootstrap pi config ───────────────────────────────────────────────────
-# Copy host pi config (settings, extensions, agents, skills, prompts, etc.)
-# so the container has identical package list and project sub-agents.
+# Copy host pi config (extensions, agents, skills, prompts, themes, etc.) but
+# NOT settings.json — the host settings lists packages that aren't pre-installed
+# in the image and pi would try to npm install -g them as the non-root agent user.
 mkdir -p "${PI_AGENT_DIR}"
 
 if [[ -d "/opt/host-pi" ]]; then
     echo "[entrypoint] Copying host pi config from /opt/host-pi"
     cp -r /opt/host-pi/. "${PI_AGENT_DIR}/" 2>/dev/null || true
 fi
+
+# Always overwrite settings.json with the container-safe version that only
+# references packages pre-installed in Dockerfile.pi (as root during build).
+cat > "${PI_AGENT_DIR}/settings.json" <<'JSON'
+{
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-sonnet-4-6",
+  "defaultThinkingLevel": "high",
+  "packages": [
+    "npm:pi-subagents",
+    "npm:@juicesharp/rpiv-todo",
+    "npm:@aliou/pi-processes",
+    "npm:@samfp/pi-memory",
+    "npm:pi-agent-browser-native",
+    "npm:pi-claude-oauth-adapter",
+    "npm:pi-web-access"
+  ],
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
+  }
+}
+JSON
+echo "[entrypoint] Pi agent settings.json written (container-safe package list)"
 
 # ── 3. Auth: OAuth token ─────────────────────────────────────────────────────
 # auth.json holds the Anthropic OAuth refresh+access tokens.
@@ -101,38 +127,7 @@ fi
 
 export PI_CODING_AGENT_DIR="${PI_AGENT_DIR}"
 
-# ── 4. Pi settings ───────────────────────────────────────────────────────────
-# Write/overwrite the project-level pi settings. The container pre-installs
-# all npm packages globally; settings.json just tells pi to load them.
-# NOTE: do NOT overwrite if the workspace already has .pi/settings.json
-# (it may have project-specific overrides).
-PI_SETTINGS="$WORKSPACE/.pi/settings.json"
-if [[ ! -f "$PI_SETTINGS" ]]; then
-    cat > "$PI_SETTINGS" <<'JSON'
-{
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-4-6",
-  "defaultThinkingLevel": "high",
-  "packages": [
-    "npm:pi-subagents",
-    "npm:@juicesharp/rpiv-todo",
-    "npm:@aliou/pi-processes",
-    "npm:@samfp/pi-memory",
-    "npm:pi-agent-browser-native",
-    "npm:pi-claude-oauth-adapter",
-    "npm:pi-web-access"
-  ],
-  "compaction": {
-    "enabled": true,
-    "reserveTokens": 16384,
-    "keepRecentTokens": 20000
-  }
-}
-JSON
-    echo "[entrypoint] Created .pi/settings.json in workspace"
-fi
-
-# Model selection via AGENT_TIER env var (mirrors claude entrypoint behaviour)
+# ── 4. Model selection via AGENT_TIER env var (mirrors claude entrypoint behaviour)
 TIER="${AGENT_TIER:-normal}"
 case "$TIER" in
     advanced) PI_MODEL="claude-opus-4-7" ;;
