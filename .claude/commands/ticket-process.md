@@ -12,23 +12,35 @@ Ticket ID: {{ARGUMENTS}}
 
 ---
 
-## Phase 0 — Worktree Setup
+## Phase 0 — Claim & Worktree Setup
 
-**This must be the very first action, before any file reads or code changes.**
+**Claim the ticket before any other work — prevents two agents picking up the same ticket simultaneously.**
 
-First, fetch the ticket to determine the branch prefix (bug → `fix/`, feature → `feat/`):
+### Step 1 — Fetch & Claim
+
+Run in parallel:
+
+1. `mcp__linear-server__get_issue` — ticket title, description, labels, type, team ID
+2. `mcp__linear-server__list_issue_statuses` — valid status IDs for the team
+
+Determine branch type from labels/title (Bug/fix → `fix/`, anything else → `feat/`):
 
 ```bash
-# After fetching ticket type from Linear (done in Phase 1),
-# determine branch name:
+GIT_EMAIL=$(git config user.email)
 TICKET="{{ARGUMENTS}}"
-BRANCH_TYPE="feat"  # or "fix" based on ticket labels — set this first
-
-BRANCH="${BRANCH_TYPE}/${TICKET}"   # e.g. feat/GYL-15
-WORKTREE="../worktrees/${BRANCH}"   # e.g. ../worktrees/feat/GYL-15
+BRANCH_TYPE="feat"  # or "fix" — set from ticket labels
+BRANCH="${BRANCH_TYPE}/${TICKET}"
+WORKTREE="../worktrees/${BRANCH}"
 ```
 
-Pull the latest base branch from remote before branching (ensures the worktree starts from current code, not stale local state):
+Claim immediately — before creating the worktree or reading any files:
+
+- `mcp__linear-server__save_issue` → `{ id, statusId: <in_progress_id>, assignee: "<GIT_EMAIL>" }`
+- `mcp__linear-server__save_comment` → *"Picking up {{ARGUMENTS}} on branch `[BRANCH]`. Setting up isolated worktree."*
+
+### Step 2 — Worktree Setup
+
+Pull the latest base branch from remote before branching:
 
 ```bash
 BASE_BRANCH="${GIT_BASE_BRANCH:-develop}"
@@ -40,7 +52,6 @@ Check if worktree already exists (idempotent — supports resuming interrupted w
 ```bash
 if wtp ls 2>/dev/null | grep -q "${BRANCH}"; then
   echo "Resuming existing worktree for ${BRANCH}"
-  # Worktree already exists — continue from where work left off
 else
   wtp add -b "${BRANCH}" "origin/${BASE_BRANCH}"
   echo "Created worktree at ${WORKTREE}"
@@ -53,15 +64,35 @@ Verify the worktree path:
 command wtp cd "${BRANCH}"   # prints absolute path — confirm it matches expectations
 ```
 
-> All subsequent file operations (Read, Edit, Write, Bash, tests) **must use `$WORKTREE` as the base path**, not the main repo directory. The worktree has the same codebase as `develop` at branch point but is fully isolated.
+> All subsequent file operations (Read, Edit, Write, Bash, tests) **must use `$WORKTREE` as the base path**, not the main repo directory.
+
+Write initial handoff artifact:
+
+```bash
+mkdir -p "thoughts/tickets/{{ARGUMENTS}}"
+```
+
+Write to `thoughts/tickets/{{ARGUMENTS}}/handoff.md`:
+
+```markdown
+---
+ticket: {{ARGUMENTS}}
+branch: [BRANCH value]
+git_commit: [git rev-parse HEAD from worktree]
+last_completed_phase: 0
+date: [current ISO timestamp]
+status: in_progress
+---
+
+## Claimed
+Set to In Progress. Branch: [BRANCH].
+```
 
 ---
 
----
+## Phase 1 — Resumption Check
 
-## Phase 0.5 — Resumption Check
-
-Before fetching the ticket from Linear, check if prior work exists for this ticket:
+Before deep analysis, check if prior work exists for this ticket:
 
 ```bash
 HANDOFF="thoughts/tickets/{{ARGUMENTS}}/handoff.md"
@@ -87,17 +118,15 @@ fi
 - If commits differ (new work was pushed externally): note the divergence, start from Phase 3 (re-explore, don't re-implement from scratch)
 - Post a comment: *"Resuming {{ARGUMENTS}} from Phase [N+1]. Prior work detected in worktree — [1 sentence on what was already done]."*
 
-**If no handoff exists:** proceed normally from Phase 1.
+**If no handoff exists:** proceed normally from Phase 2.
 
 ---
 
-## Phase 1 — Fetch & Analyze
+## Phase 2 — Deep Analysis
 
-Fetch everything in parallel:
+Fetch remaining ticket data (get_issue results are already available from Phase 0):
 
-1. `mcp__linear-server__get_issue` — full ticket details
-2. `mcp__linear-server__list_issue_statuses` — valid status IDs for the team
-3. `mcp__linear-server__list_comments` — prior discussion and previous attempt notes
+- `mcp__linear-server__list_comments` — prior discussion and previous attempt notes
 
 **Check thought store for plan artifact (preferred over comment parsing):**
 
@@ -112,11 +141,10 @@ else
 fi
 ```
 
-Parse and record:
+Parse and record from Phase 0 results:
 
 - **Title**, **description**, **priority**, **labels**, **current status**, **team ID**
-- **Type**: Bug (labels: Bug / title starts with fix/bug) → `fix/` branch; Feature/Improvement → `feat/` branch
-- Use the type to set `BRANCH_TYPE` in Phase 0 before creating the worktree
+- Confirm `BRANCH_TYPE` matches ticket labels (correct if needed)
 
 **Dependency Check (child/sibling tickets):**
 
@@ -130,49 +158,11 @@ If the ticket has a `parent` field, it is a child ticket. Fetch the parent issue
 
 If description is too vague (< 2 actionable sentences):
 
-- Post comment: *"Picking up {{ARGUMENTS}} in isolated worktree. Description needs clarification before I can proceed — [specific question]."*
+- Post comment: *"Picked up {{ARGUMENTS}}. Description needs clarification before I can proceed — [specific question]."*
 - Use `AskUserQuestion` to gather context, then continue
 
 ---
 
-## Phase 2 — Claim the Ticket
-
-**Always run this phase** — whether the ticket is fresh (Todo/Backlog) or being re-processed (Change Required). Do not skip it even when resuming an existing worktree.
-
-1. Find "In Progress" status ID from Phase 1 results
-2. Resolve the git user email to use as the Linear assignee:
-
-   ```bash
-   GIT_EMAIL=$(git config user.email)
-   ```
-
-3. `mcp__linear-server__save_issue` → `{ id, statusId: <in_progress_id>, assignee: "<GIT_EMAIL>" }`
-4. `mcp__linear-server__save_comment`:
-   > "Picked up in isolated worktree on branch `feat/{{ARGUMENTS}}`. Plan: [1–3 sentence summary]. Changes are isolated to this branch — nothing touches `develop` until pushed."
-
-5. Write initial handoff artifact:
-
-   ```bash
-   mkdir -p "thoughts/tickets/{{ARGUMENTS}}"
-   ```
-
-   Write to `thoughts/tickets/{{ARGUMENTS}}/handoff.md`:
-
-   ```markdown
-   ---
-   ticket: {{ARGUMENTS}}
-   branch: [BRANCH value]
-   git_commit: [git rev-parse HEAD from worktree]
-   last_completed_phase: 2
-   date: [current ISO timestamp]
-   status: in_progress
-   ---
-
-   ## Claimed
-   Set to In Progress. Branch: [BRANCH]. Plan: [1–3 sentence summary from claiming comment].
-   ```
-
----
 
 ## Phase 3 — Explore & Plan
 
@@ -223,7 +213,7 @@ Implementation done. Key files changed: [list from implementer output].
 
 ---
 
-## Phase 5a — Automated Tests
+## Phase 5 — Automated Tests
 
 Run test suites **from the worktree path**. Run all that apply:
 
@@ -240,16 +230,16 @@ cd "${WORKTREE}/frontend-issuance" && pnpm lint && pnpm build 2>&1 | tail -30
 
 If tests fail: attempt to fix (up to 2 iterations). After 2 failed attempts, post a comment with full output and `AskUserQuestion`.
 
-Update `thoughts/tickets/{{ARGUMENTS}}/handoff.md` — set `last_completed_phase: "5a"`. Append:
+Update `thoughts/tickets/{{ARGUMENTS}}/handoff.md` — set `last_completed_phase: 5`. Append:
 
 ```markdown
-## Phase 5a Complete
+## Phase 5 Complete
 Tests: [pass/fail summary — suites run and outcomes].
 ```
 
 ---
 
-## Phase 5b — Visual Proof (Mandatory)
+## Phase 6 — Visual Proof (Mandatory)
 
 **Every ticket requires proof that the implemented behaviour actually works. No ticket moves to Review Pending without it. All proof must be uploaded to the Linear ticket — not just saved locally.**
 
@@ -291,7 +281,7 @@ Walk through **every acceptance criterion** that has a visible outcome. For each
   - `title`: `[Step N] [Short description of what is shown]`
   - `subtitle`: `{{ARGUMENTS}} — implementation proof`
 
-  **Record the `url` returned by each `create_attachment` call.** You will embed these as inline markdown images in the Phase 6 completion comment so reviewers see previews directly in Linear without downloading.
+  **Record the `url` returned by each `create_attachment` call.** You will embed these as inline markdown images in the Phase 7 completion comment so reviewers see previews directly in Linear without downloading.
 
 **Minimum required screenshots (all must be uploaded):**
 
@@ -349,7 +339,7 @@ Then call `mcp__linear-server__create_attachment`:
 - `title`: `[API] [Criterion] — happy path`
 - `subtitle`: `{{ARGUMENTS}} — implementation proof`
 
-**Also embed the full JSON inline in the completion comment** (see Phase 6) so reviewers can read it without downloading.
+**Also embed the full JSON inline in the completion comment** (see Phase 7) so reviewers can read it without downloading.
 
 ### Confirm All Attachments Uploaded
 
@@ -361,13 +351,13 @@ ls -la "${PROOF_DIR}/"
 
 **Step 2 — verify uploads reached Linear (mandatory):**
 
-Call `mcp__linear-server__get_issue` with the issue UUID (from Phase 1) and confirm `attachments` is non-empty. The count must equal the number of files you uploaded. If the count is lower than expected, re-call `mcp__linear-server__create_attachment` for any missing files and re-check until counts match.
+Call `mcp__linear-server__get_issue` with the issue UUID (from Phase 2) and confirm `attachments` is non-empty. The count must equal the number of files you uploaded. If the count is lower than expected, re-call `mcp__linear-server__create_attachment` for any missing files and re-check until counts match.
 
 Local file existence alone is not sufficient — only a non-zero `attachments` count in Linear confirms reviewers can see the proof.
 
 ---
 
-## Phase 6 — Commit, Push & Hand Off
+## Phase 7 — Commit, Push & Hand Off
 
 1. Commit all changes inside the worktree:
 
@@ -405,35 +395,23 @@ Local file existence alone is not sufficient — only a non-zero `attachments` c
 
    **Changes:**
    - [file path: what changed and why]
-   - [file path: what changed and why]
 
    **Tests:** [summary — suites run, pass/fail counts]
 
-   **Proof of working behaviour** (attachments uploaded to this ticket):
-   - 📸 `step-1-initial-state.jpg` — [what it shows]
-   - 📸 `step-2-happy-path.jpg` — [what it shows]
-   - 📸 `step-3-error-state.jpg` — [what it shows]
-   (list every uploaded attachment filename)
-
-   **Screenshots (inline previews):**
+   **Screenshots** (inline — renders in Linear):
    ![Step 1 — Initial state]([url from create_attachment for step-1])
    ![Step 2 — Happy path]([url from create_attachment for step-2])
    ![Step 3 — Error state]([url from create_attachment for step-3])
 
-   **API responses** (if backend ticket — embed full JSON inline):
-
+   **API responses** (backend tickets — embed full JSON inline):
    `POST /[endpoint]` — happy path (HTTP [status]):
    ```json
    [paste full response JSON]
    ```
-
    `POST /[endpoint]` — error case (HTTP [status]):
-
    ```json
    [paste full response JSON]
    ```
-
-   **Console errors during testing:** [none / list exact error text]
 
    **Next step:** `/ticket-review {{ARGUMENTS}}`
 
@@ -454,102 +432,22 @@ Local file existence alone is not sufficient — only a non-zero `attachments` c
 | Feature branch | `feat/{{ARGUMENTS}}` |
 | Worktree path | `../worktrees/<branch>` |
 | Managed by | `wtp` (status: managed) |
-| Lifecycle | Created in Phase 0, kept after Phase 6 for review |
+| Lifecycle | Created in Phase 0, kept after Phase 7 for review |
 
 ## Status Transitions
 
 ```
-Backlog / Todo  →  In Progress      (Phase 2)
-In Progress     →  Review Pending   (Phase 6, PR path)
-In Progress     →  Done             (Phase 6, self-contained)
+Backlog / Todo  →  In Progress      (Phase 0)
+In Progress     →  Review Pending   (Phase 7, PR path)
+In Progress     →  Done             (Phase 7, self-contained)
 ```
 
 ## Critical Rules
 
-1. **Phase 0 first** — `wtp add` before any file operation
+1. **Claim first** — set In Progress before any worktree setup or file operation
 2. **All paths use `$WORKTREE`** — never read or write files in the main repo during implementation
 3. **Never work on `develop` directly** — the worktree branch is the blast radius boundary
 4. **Push before handing off** — `/ticket-review` needs the branch on origin
 5. **Record branch name in completion comment** — the reviewer reads this to find the branch
 6. **Do not remove the worktree** — it persists for `/ticket-review`
-7. **Visual proof is mandatory** — Phase 5b cannot be skipped; every ticket must have at least one screenshot or API response file uploaded to Linear before commit
-
-## Orchestration Map
-
-```
-/ticket-process GYL-XX
-        │
-        ▼
-Phase 0: git fetch origin develop
-         wtp add -b feat/GYL-XX origin/develop
-  → ../worktrees/feat/GYL-XX (isolated, managed by wtp)
-        │
-        ▼
-Phase 0.5: Resumption Check
-  thoughts/tickets/GYL-XX/handoff.md exists?
-  ├── yes + git commit matches → skip to phase after last_completed_phase
-  ├── yes + git diverged → resume from Phase 3
-  └── no → continue from Phase 1
-        │
-        ▼
-Phase 1: Fetch & Analyze [parallel]
-  get_issue + list_issue_statuses + list_comments
-        │
-        ├── child ticket? → fetch parent + siblings → check prerequisites
-        │     └── blocking sibling not started? → restart with prereq ticket ID first, then return to {{ARGUMENTS}}
-        │
-        ├── vague? → save_comment + AskUserQuestion
-        │
-        ▼
-Phase 2: Claim
-  save_issue: In Progress
-  save_comment: branch name + plan
-        │
-        ▼
-Phase 3: Explore & Plan [inside worktree]
-  ┌─────────────────────────┐
-  │ bug-investigator (bug)  │
-  │ Explore + Plan (feat)   │
-  └────────────┬────────────┘
-               │
-               ├── key decision? → save_comment
-               │
-               ▼
-Phase 4: Implement [cd $WORKTREE]
-  senior-implementer agent
-               │
-               ├── blocker? → save_comment + AskUserQuestion
-               │
-               ▼
-Phase 5a: Automated Tests [cd $WORKTREE]
-  cargo test / npm test / pnpm lint+build
-               │
-               ├── fail? → fix (×2) → save_comment + AskUserQuestion
-               │
-               ▼
-Phase 5b: Visual Proof [MANDATORY]
-  ┌─────────────────────────────────────────────────┐
-  │ UI tickets:                                     │
-  │   new_page → navigate :8105                     │
-  │   take_screenshot jpeg q70 per criterion        │
-  │   base64 encode → create_attachment on Linear   │
-  │   record returned url for inline previews       │
-  │   → /tmp/screenshots/GYL-XX/step-N-*.jpg        │
-  │                                                 │
-  │ API/backend tickets:                            │
-  │   curl happy path + error case                  │
-  │   base64 encode → create_attachment on Linear   │
-  │   → /tmp/screenshots/GYL-XX/api-proof-*.json    │
-  │                                                 │
-  │ verify: get_issue attachments count matches     │
-  └──────────────────────┬──────────────────────────┘
-               │
-               ├── frontend won't start? → AskUserQuestion (never skip)
-               │
-               ▼
-Phase 6: Commit + Push + Hand Off
-  git commit + git push origin feat/GYL-XX
-  save_issue: Review Pending / Done
-  save_comment: branch name + changes + proof filenames + inline image previews
-  [worktree kept for /ticket-review]
-```
+7. **Visual proof is mandatory** — Phase 6 cannot be skipped; every ticket must have at least one screenshot or API response file uploaded to Linear before commit
