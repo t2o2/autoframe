@@ -61,21 +61,13 @@ Spawn multiple `Explore` agents in parallel — each focused on a specific resea
 
 Each sub-agent prompt must lead with its prohibition contract before its task:
 
-- **SCOPE AGENT**
-  `MUST NOT: Suggest improvements. Critique code quality. Speculate about what should change. Recommend refactors.`
-  `ONLY DO: Find all files that implement or reference [feature area]. List file paths, function names, and a one-sentence description of what each does. If nothing found, say so explicitly. Return concrete file:line references only.`
+- **SCOPE AGENT** — `MUST NOT suggest, critique, or speculate. ONLY DO: Find all files implementing/referencing [feature area]. List file paths, function names, one-sentence descriptions, file:line refs. Say explicitly if nothing found.`
 
-- **PATTERN AGENT**
-  `MUST NOT: Critique existing patterns. Suggest better approaches. Recommend changes.`
-  `ONLY DO: Find existing patterns in the codebase similar to [what this ticket requires]. Show me examples to follow, not critiques to fix. Return file:line references and describe what each pattern does — nothing more.`
+- **PATTERN AGENT** — `MUST NOT critique or recommend changes. ONLY DO: Find existing patterns similar to [what this ticket requires]. Return file:line refs and describe what each does — nothing more.`
 
-- **TEST AGENT**
-  `MUST NOT: Assess test quality. Suggest missing tests. Recommend improvements.`
-  `ONLY DO: Find existing tests for [the affected component]. Return file paths, what behaviors each test covers, and the test setup helpers available. Document what exists — not what should exist.`
+- **TEST AGENT** — `MUST NOT assess quality or suggest improvements. ONLY DO: Find existing tests for [the affected component]. Return file paths, behaviors covered, and setup helpers.`
 
-- **SCHEMA / TYPES AGENT**
-  `MUST NOT: Suggest schema changes. Flag normalization issues. Recommend type improvements.`
-  `ONLY DO: Find database schema definitions, Rust structs/enums, or TypeScript interfaces related to [the area]. Return file:line references and the exact type definitions. No commentary.`
+- **SCHEMA / TYPES AGENT** — `MUST NOT suggest changes or flag issues. ONLY DO: Find schema definitions, Rust structs/enums, or TypeScript interfaces for [the area]. Return file:line refs and exact type definitions. No commentary.`
 
 Wait for **ALL** sub-agents to complete before proceeding to Phase 4.
 
@@ -188,41 +180,4 @@ Research   →  Research Pending Approval   (Phase 5)
 5. **No code changes** — this command does not touch any file in the repository
 6. **Wait for all sub-agents** — synthesize only after every parallel agent has returned
 
-## Orchestration Map
 
-```
-/ticket-research GYL-XX
-        │
-        ▼
-Phase 1: Fetch & Claim
-  get_issue + list_issue_statuses + list_comments  [parallel]
-  save_issue: Research
-  save_comment: "picking up research"
-        │
-        ├── vague? → AskUserQuestion
-        │
-        ▼
-Phase 2: Identify Research Areas
-  decompose ticket into investigation topics
-        │
-        ▼
-Phase 3: Parallel Codebase Exploration  [all agents in parallel]
-  ┌─────────────────────┐ ┌─────────────────────┐
-  │  Explore (scope)    │ │  Explore (patterns)  │
-  └──────────┬──────────┘ └──────────┬───────────┘
-             │                       │
-  ┌──────────┴──────────┐ ┌──────────┴───────────┐
-  │  Explore (tests)    │ │  Explore (schema)     │
-  └──────────┬──────────┘ └──────────┬───────────┘
-             └───────────┬───────────┘
-                         ▼ (wait for all)
-Phase 4: Synthesize Research
-  compile findings → structured research document
-                         │
-                         ▼
-Phase 5: Post & Transition
-  save_comment: research document
-  save_issue: Research Pending Approval
-  save_comment: "next step: move to Research Approved"
-  write: thoughts/tickets/{{ARGUMENTS}}/research.md
-```

@@ -60,21 +60,13 @@ Spawn focused `Explore` agents for any gaps — only what is genuinely needed. E
 
 Each sub-agent prompt must lead with its prohibition contract:
 
-- **INTERFACE AGENT**
-  `MUST NOT: Suggest type improvements. Flag design issues. Recommend alternatives.`
-  `ONLY DO: Show me the exact type definitions for [interface/struct]. Return the definition with file:line. Nothing more.`
+- **INTERFACE AGENT** — `MUST NOT suggest improvements or flag issues. ONLY DO: Show the exact type definitions for [interface/struct] with file:line. Nothing more.`
 
-- **DEPENDENCY AGENT**
-  `MUST NOT: Critique coupling. Suggest refactors. Flag architecture issues.`
-  `ONLY DO: List what [component X] imports and what traits/interfaces it implements. Return file:line refs for each dependency. No analysis.`
+- **DEPENDENCY AGENT** — `MUST NOT critique coupling or suggest refactors. ONLY DO: List what [component X] imports and what traits/interfaces it implements. Return file:line refs per dependency. No analysis.`
 
-- **TEST PATTERN AGENT**
-  `MUST NOT: Assess test quality. Recommend improvements. Flag gaps.`
-  `ONLY DO: Show me how existing tests for [component] are structured — test file path, setup helpers used, how fixtures are constructed. I need examples to copy, not critiques.`
+- **TEST PATTERN AGENT** — `MUST NOT assess quality or flag gaps. ONLY DO: Show how existing tests for [component] are structured — file path, setup helpers, fixture construction. Examples to copy, not critiques.`
 
-- **MIGRATION AGENT**
-  `MUST NOT: Suggest schema improvements. Flag normalization issues.`
-  `ONLY DO: Find existing SQL migration files. Show the file naming convention and one representative example of the migration format used in this repo. No recommendations.`
+- **MIGRATION AGENT** — `MUST NOT suggest improvements or flag issues. ONLY DO: Find existing SQL migration files. Show naming convention and one representative example. No recommendations.`
 
 Spawn agents in parallel. Wait for **ALL** before proceeding.
 
@@ -254,38 +246,4 @@ Planning           →  Plan Pending Approval (Phase 5)
 5. **Post to Linear** — the plan lives as a ticket comment, not just local context
 6. **Explicit scope boundary** — always include a "What We're NOT Doing" section
 
-## Orchestration Map
 
-```
-/ticket-plan GYL-XX
-        │
-        ▼
-Phase 1: Fetch Ticket & Research
-  get_issue + list_issue_statuses + list_comments  [parallel]
-  save_issue: Planning  ← claim step
-  extract research comment
-  save_comment: "starting planning"
-        │
-        ├── no research? → note absence, continue from description
-        │
-        ▼
-Phase 2: Fill Research Gaps  [parallel Explore agents as needed]
-  ┌─────────────────────┐ ┌─────────────────────────┐
-  │  Explore (types)    │ │  Explore (test patterns) │
-  └──────────┬──────────┘ └──────────┬───────────────┘
-             └───────────┬───────────┘
-                         ▼ (wait for all)
-Phase 3: Resolve Key Decisions
-  identify approach → post comment if human judgment needed
-                         │
-                         ▼
-Phase 4: Write Implementation Plan
-  phased plan → file changes → success criteria per phase
-                         │
-                         ▼
-Phase 5: Post & Transition
-  save_comment: implementation plan
-  save_issue: Plan Pending Approval
-  save_comment: "next step: move to Plan Approved"
-  write: thoughts/tickets/{{ARGUMENTS}}/plan.md
-```

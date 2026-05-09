@@ -192,7 +192,7 @@ Capture **full output** (stdout + stderr) — paste into the review comment rega
 
 ## Phase 5 — Visual Proof (Mandatory — Never Skip)
 
-**Every ticket requires proof. There is no "backend-only" exception. NEVER mark a ticket PASS without evidence per acceptance criterion. All proof must be visible in the Linear app: screenshots as inline image previews, text responses as comment code blocks.**
+**All proof must be uploaded to Linear — screenshots as inline image previews, API responses as comment code blocks.**
 
 Set the proof directory:
 
@@ -335,7 +335,6 @@ Call `mcp__linear-server__create_attachment`:
 
 Repeat for error and confirm files.
 
-**All JSON files must contain real server responses — not empty objects or mocked data.**
 
 ### Confirm All Attachments Uploaded
 
@@ -447,16 +446,8 @@ Build the review comment. Post via `mcp__linear-server__save_comment`. Every sec
 ![Step 2 — Happy path]([url returned by create_attachment for step-2])
 ![Step 3 — Error state]([url returned by create_attachment for step-3])
 
-| # | Filename | What it shows |
-|---|---|---|
-| 1 | `step-1-initial-state.jpg` | [description] |
-| 2 | `step-2-happy-path.jpg` | [description] |
-| 3 | `step-3-error-state.jpg` | [description] |
 
-**Console errors found:** [none / list exact error text]
 
-**UI testing session recording:** `thoughts/tickets/{{ARGUMENTS}}/review-recording.webm`
-*(Play locally with any media player — full session, no re-running the environment needed)*
 
 **API responses** (backend tickets — full JSON inline):
 
@@ -598,19 +589,6 @@ In Review       →  Human Review     (PASS: all tests green, criteria met)
 In Review       →  Changes Required (FAIL: any test red, criteria missed)
 ```
 
-## Evidence Standards
-
-The bar for documentation: **a fresh agent reading only the ticket + its comments must reproduce any failure in under 2 minutes.**
-
-Required in every review comment:
-
-- Full test output (not paraphrased — paste the actual output)
-- Screenshots rendered as inline `![alt](url)` images so they display in Linear without clicking
-- API JSON responses embedded as fenced code blocks in the comment body
-- Exact console error text (not summarised)
-- `file:line` for every code concern raised
-- Exact reproduction steps written as numbered CLI/UI actions
-
 ## Worktree Convention
 
 | Attribute | Value |
@@ -630,89 +608,3 @@ Required in every review comment:
 6. **One comprehensive comment** — post a single review report, not incremental updates
 7. **Never remove the worktree** — it is shared with `/ticket-process` and `/ticket-approve`; only `/ticket-approve` removes it
 8. **NEVER move a ticket to Done** — the only valid PASS destination is `Human Review`. Done requires explicit human approval. Moving to Done is forbidden regardless of test results.
-
-## Orchestration Map
-
-```
-/ticket-review GYL-XX
-        │
-        ▼
-Phase 0: Claim & find implementation branch
-  get_issue + list_issue_statuses + list_comments [parallel]
-  save_issue: In Review  (claim immediately)
-  save_comment: "Picking up review..."
-        │
-        ├── no branch? → save_comment + Changes Required → exit
-        │
-        ▼
-Phase 1: Locate implementation worktree
-  wtp ls | grep feat/GYL-XX  (reuse existing impl worktree)
-  → ../worktrees/feat/GYL-XX  (shared with /ticket-process)
-        │
-        ▼
-Phase 2: Understand implementation
-  git log develop..HEAD + read thoughts/ artifacts
-  extract claimed files from completion comment
-        │
-        ├── no commits? → save_comment + Changes Required → exit
-        │
-        ▼
-Phase 2b: Validate Against Git Ground Truth
-  git diff develop...HEAD --name-only (actual)
-  vs. claimed files from completion comment
-  flag: claimed-but-missing, undeclared-scope-changes
-        │
-        ▼
-Phase 3: Code Review
-  Explore agent (quick) scoped to changed files
-        │
-        ▼
-Phase 4: Tests [parallel where independent]
-  ┌──────────────────────────────────────────┐
-  │ cargo test --all (Rust changes)          │
-  │ cd keeper && npm test (TS changes)       │
-  │ pnpm lint+build (frontend changes)       │
-  │ Write + commit new tests if gaps found   │
-  └──────────────────────┬───────────────────┘
-                         │
-                         ▼
-Phase 5: Visual Proof [MANDATORY — no skip]
-  ┌──────────────────────────────────────────────────┐
-  │ UI tickets (agent-browser + recording):           │
-  │   record start → review-recording.webm           │
-  │   open :8105 → snapshot → walk criteria          │
-  │   screenshot PNG→JPEG sips → create_attachment   │
-  │   record stop → thoughts/tickets/GYL-XX/         │
-  │   → /tmp/screenshots/GYL-XX-review/step-N-*.jpg  │
-  │                                                  │
-  │ API/backend tickets:                             │
-  │   curl happy path + error case per criterion     │
-  │   base64 → create_attachment on Linear           │
-  │   → /tmp/screenshots/GYL-XX-review/api-*.json    │
-  │                                                  │
-  │ verify: get_issue attachment count matches       │
-  │ Empty proof dir = FAIL — AskUserQuestion         │
-  └──────────────────────┬───────────────────────────┘
-                         │
-                         ▼
-Phase 6: Verdict + Review Comment
-  save_comment: tests + ![img](url) previews + JSON code blocks
-  write: thoughts/tickets/{{ARGUMENTS}}/review.md
-                         │
-               ┌─────────┴──────────┐
-             PASS                 FAIL
-               │                   │
-               ▼                   ▼
-Phase 7: Update Linear Status
-  save_issue: Human Review   save_issue: Changes Required
-               │                   │
-               ▼                   ▼
-Phase 8: Hand Off
-  AskUserQuestion:           Inform user: FAILED
-  "PASSED — verify at        (worktree kept for implementer)
-   localhost:8105."
-               │
-               ▼
-Phase 9: No clean up — worktree owned by /ticket-process
-  (removed only by /ticket-approve)
-```

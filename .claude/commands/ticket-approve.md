@@ -289,14 +289,6 @@ Repository is clean.
 | Branch cleanup | Deleted locally and on `origin` |
 | Worktree cleanup | Removed via `wtp rm` or `git worktree remove` |
 
-## Target Branch Logic
-
-| Ticket has parent? | Target branch |
-|---|---|
-| No | Your main integration branch (develop / main / master) |
-| Yes, parent branch found | `feat/<parent-id>` or `fix/<parent-id>` |
-| Yes, parent branch missing | Falls back to main branch with a warning |
-
 ## Status Transitions
 
 ```
@@ -314,66 +306,3 @@ Note: Only the sub-ticket moves to Done. The parent ticket stays open until all 
 5. **Delete both local and remote** — a half-cleaned branch causes confusion for future agents
 6. **Move ticket to Done last** — only after the push is verified; never on merge alone
 7. **Never force-push protected branches** — if the push fails, investigate rather than using `--force`
-
-## Orchestration Map
-
-```
-/ticket-approve TICKET-XX
-        │
-        ▼
-Phase 0: Resolve branch name
-  git show-ref feat/TICKET-XX || fix/TICKET-XX
-        │
-        ├── not found? → report + exit
-        │
-        ▼
-Phase 0.5: Resolve merge target
-  get_issue(TICKET-XX) → check parentId
-  ├── no parent → TARGET_BRANCH=<main branch>
-  └── parent found → get_issue(parentId) → resolve feat/parent or fix/parent
-                      ├── branch found → TARGET_BRANCH=feat/TICKET-YY
-                      └── branch missing → TARGET_BRANCH=<main branch> (warn)
-        │
-        ▼
-Phase 1: Safety checks [parallel]
-  git fetch + pull origin ${TARGET_BRANCH}
-  git fetch + pull origin ${BRANCH}
-  merge-tree conflict detection
-        │
-        ├── conflicts? → report + exit
-        │
-        ▼
-Phase 2: Rebase + fast-forward
-  git checkout ${BRANCH}
-  git rebase ${TARGET_BRANCH}
-  git checkout ${TARGET_BRANCH}
-  git merge --ff-only ${BRANCH}
-        │
-        ├── rebase conflicts? → git rebase --abort + report + exit
-        │
-        ▼
-Phase 3: Push ${TARGET_BRANCH}
-  git push origin ${TARGET_BRANCH}
-  verify local == origin/${TARGET_BRANCH}
-        │
-        ▼
-Phase 4: Update Linear
-  list_issue_statuses → find Done
-  save_issue: Done
-  save_comment: merge summary
-        │
-        ▼
-Phase 5: Remove worktree
-  wtp rm ${BRANCH} || git worktree remove
-  git worktree prune
-        │
-        ▼
-Phase 6: Delete branch
-  git branch -d ${BRANCH}
-  git push origin --delete ${BRANCH}
-  git remote prune origin
-        │
-        ▼
-Phase 7: Final report
-  Print summary + verify no leftover refs
-```
