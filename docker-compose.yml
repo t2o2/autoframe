@@ -22,6 +22,8 @@ x-agent-base: &agent-base
     # Claude auth and commands — read-only from host
     - ${HOME}/.claude.json:/opt/host-claude.json:ro
     - ${HOME}/.claude:/opt/host-claude:ro
+    # Agent skills (Linear API scripts, etc.) — read-only from host
+    - ${HOME}/.agents:/opt/host-agents:ro
     # SSH key for git (optional — use if GIT_REPO_URL is an ssh:// URL)
     # - ${HOME}/.ssh:/home/agent/.ssh:ro
     # Persistent Rust build cache — survives container restarts

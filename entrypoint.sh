@@ -6,7 +6,7 @@
 # worktrees live inside the container; changes are pushed to the remote.
 #
 # Patches needed for the container environment:
-#   • ~/.claude.json  — linear-server (stdio/API-key) + headless chrome-devtools
+#   • ~/.claude.json  — headless chrome-devtools (Linear via ~/.agents/skills/linear/ scripts)
 #   • git credentials — GITHUB_TOKEN → HTTPS auth, or mount ~/.ssh for SSH
 
 set -euo pipefail
@@ -118,6 +118,14 @@ cp -r /opt/host-claude/. "${HOME}/.claude/" 2>/dev/null || true
 echo '{"version":1}' > "${HOME}/.claude/credentials.json"
 echo "[entrypoint] ~/.claude bootstrapped (full copy from /opt/host-claude)"
 
+# Copy agent skills (Linear API scripts, etc.) from host mount
+if [[ -d /opt/host-agents ]]; then
+    mkdir -p "${HOME}/.agents"
+    cp -r /opt/host-agents/. "${HOME}/.agents/" 2>/dev/null || true
+    find "${HOME}/.agents" -name "*.sh" -exec chmod +x {} \;
+    echo "[entrypoint] ~/.agents bootstrapped (full copy from /opt/host-agents)"
+fi
+
 # ── 4. Patch ~/.claude.json ──────────────────────────────────────────────────
 cp /opt/host-claude.json "${HOME}/.claude.json"
 
@@ -129,13 +137,6 @@ with open(claude_json) as f:
     config = json.load(f)
 
 config.setdefault('mcpServers', {})
-
-config['mcpServers']['linear-server'] = {
-    'type': 'stdio',
-    'command': 'node',
-    'args': ['/opt/linear-mcp/server.js'],
-    'env': {'LINEAR_API_KEY': os.environ.get('LINEAR_API_KEY', '')},
-}
 
 config['mcpServers']['chrome-devtools'] = {
     'type': 'stdio',
@@ -167,10 +168,7 @@ if auth_mode == 'openrouter':
 # oauth_token mode: Claude Code reads CLAUDE_CODE_OAUTH_TOKEN directly.
 # No ANTHROPIC_API_KEY or base URL override needed.
 
-for proj in config.get('projects', {}).values():
-    disabled = proj.get('disabledMcpServers', [])
-    if 'linear-server' in disabled:
-        proj['disabledMcpServers'] = [s for s in disabled if s != 'linear-server']
+# No MCP servers need force-enabling — linear-server removed (use ~/.agents/skills/linear/)
 
 with open(claude_json, 'w') as f:
     json.dump(config, f, indent=2)
