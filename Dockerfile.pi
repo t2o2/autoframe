@@ -73,6 +73,17 @@ RUN case "${TARGETARCH}" in \
     dpkg -i /tmp/wtp.deb && \
     rm /tmp/wtp.deb
 
+# rtk — token-optimized CLI proxy (architecture-aware tarball)
+RUN case "${TARGETARCH}" in \
+      arm64) RTK_ARCH="aarch64-unknown-linux-gnu" ;; \
+      amd64) RTK_ARCH="x86_64-unknown-linux-musl" ;; \
+      *) echo "Unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/rtk-ai/rtk/releases/download/v0.39.0/rtk-${RTK_ARCH}.tar.gz" \
+      -o /tmp/rtk.tar.gz && \
+    tar xzf /tmp/rtk.tar.gz -C /usr/local/bin && \
+    rm /tmp/rtk.tar.gz
+
 # Bake autoframe agent scripts + pi prompts into the image
 COPY scripts /opt/autoframe/scripts
 RUN chmod +x /opt/autoframe/scripts/*.sh
