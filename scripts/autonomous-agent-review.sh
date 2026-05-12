@@ -166,9 +166,6 @@ for raw in sys.stdin:
                 if name in ('Bash', 'bash'):
                     cmd = (inp.get('command') or '')[:80]
                     hint = f'  {DM}{cmd}{R}'
-                elif name.startswith('mcp__linear'):
-                    short = name.replace('mcp__linear-server__', '')
-                    hint  = f'  {DM}{short}{R}'
                 elif name.startswith('mcp__chrome'):
                     short = name.replace('mcp__chrome-devtools__', '')
                     hint  = f'  {DM}{short}{R}'

@@ -3,7 +3,7 @@ description: Create a phased implementation plan for a Linear ticket and post it
 argument-hint: "<ticket-id>"
 ---
 
-Create phased implementation plan: read research, explore gaps, design phases with file changes + success criteria, post to Linear.
+Create phased implementation plan: read research, explore gaps, design phases with file changes + success criteria, post to Linear. All Linear API via `~/.agents/skills/linear/` scripts.
 
 ## Request
 
@@ -13,7 +13,11 @@ Ticket ID: $ARGUMENTS
 
 ## Phase 1 — Fetch Ticket & Research
 
-Fetch via `linear_gql` (bash+curl): issue details, workflow states, comments — in parallel.
+Fetch in parallel:
+```bash
+bash ~/.agents/skills/linear/get-issue.sh "$ARGUMENTS"
+bash ~/.agents/skills/linear/list-states.sh
+```
 
 Check research artifact first:
 ```bash
@@ -21,33 +25,33 @@ RESEARCH_ARTIFACT="thoughts/tickets/$ARGUMENTS/research.md"
 [ -f "$RESEARCH_ARTIFACT" ] && echo "Reading research artifact" || echo "Scanning comments"
 ```
 
-Extract: title, description, priority, labels, research findings.
+Extract: title, description, priority, labels, team ID, research findings (relevant files, patterns, complexity, decisions).
 
 Claim:
+```bash
+bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <planning_uuid>
+bash ~/.agents/skills/linear/add-comment.sh "$ARGUMENTS" "Starting implementation planning for $ARGUMENTS."
 ```
-linear_gql issueUpdate → { statusId: <planning_id> }
-```
-Post: "Starting planning for $ARGUMENTS."
 
 ---
 
 ## Phase 2 — Fill Research Gaps
 
-Spawn focused `Explore` agents for genuine gaps only. Prefix every prompt with: `"MUST NOT suggest/critique/recommend. ONLY DO: <task>. Return file:line refs only."`
+Spawn focused `Explore` agents only for genuine gaps. Prefix every sub-agent prompt with: `"MUST NOT suggest/critique/recommend. ONLY DO: <specific task>. Return file:line refs only."`
 
 Examples: interface definitions, dependency maps, test patterns, migration conventions.
 
-Parallel. Wait for all. May need 0–2 agents if research was thorough.
+Spawn in parallel. Wait for all. If research was thorough, may need 0–2 agents.
 
 ---
 
 ## Phase 3 — Resolve Key Decisions
 
-Identify architectural decisions. If human judgment needed:
+Identify architectural decisions. If genuinely ambiguous and needs human input:
 ```bash
 ./scripts/ask-human.sh $ARGUMENTS "<question>" "<option1>" "<option2>"
 ```
-Timeout → default. No credentials → post comment, proceed conservatively.
+Timeout → default to option 1. No credentials → post comment, proceed conservatively.
 
 ---
 
@@ -62,7 +66,7 @@ Phased plan — each phase independently testable:
 [2–3 sentences: approach + rationale]
 
 ### What We're NOT Doing
-[Scope boundaries]
+[Explicit scope boundaries]
 
 ### Phase N — [Name]
 **Goal:** [one sentence]
@@ -70,20 +74,28 @@ Phased plan — each phase independently testable:
 **Success criteria:** automated checks + manual verification
 
 ### Testing Strategy
-Unit tests, integration tests, regression risks.
+Unit tests to add, integration tests, regression risks.
 
 ### Rollback Notes
-### References
+[How to undo]
 ```
 
 ---
 
 ## Phase 5 — Post Plan & Transition
 
-1. Post plan as comment via `linear_gql` `commentCreate`
-2. Move to Plan Pending Approval via `issueUpdate`
-3. Post: "Plan posted. Move to **Plan Approved** to trigger coding agent."
-4. Write artifact to `thoughts/tickets/$ARGUMENTS/plan.md`
+1. Post plan as comment:
+   ```bash
+   bash ~/.agents/skills/linear/add-comment.sh "$ARGUMENTS" "[plan markdown]"
+   ```
+
+2. Move to Plan Pending Approval:
+   ```bash
+   bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <plan_pending_approval_uuid>
+   bash ~/.agents/skills/linear/add-comment.sh "$ARGUMENTS" "Plan posted. Move to **Plan Approved** to trigger coding agent."
+   ```
+
+3. Write artifact to `thoughts/tickets/$ARGUMENTS/plan.md` with: overview, scope boundaries, phase checklist, key files, testing strategy.
 
 ---
 
@@ -102,3 +114,4 @@ Planning           →  Plan Pending Approval (Phase 5)
 4. No implementation — plan only, zero code changes
 5. Post to Linear — plan lives as a ticket comment
 6. Explicit scope boundary — always include "What We're NOT Doing"
+7. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools

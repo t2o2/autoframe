@@ -3,7 +3,7 @@ description: Merge an approved ticket branch onto the main branch (or parent tic
 argument-hint: "<ticket-id>"
 ---
 
-Merge ticket branch onto target, push, clean up. Uses ff-only → no-ff fallback. If ticket has a parent, merge onto parent's branch instead of main.
+Merge ticket branch onto target, push, clean up. Uses ff-only → no-ff fallback. If ticket has a parent, merge onto parent's branch instead of main. All Linear API via `~/.agents/skills/linear/` scripts.
 
 ## Request
 
@@ -31,7 +31,12 @@ WORKTREE="../worktrees/${BRANCH}"
 
 ## Phase 0.5 — Resolve Merge Target
 
-Fetch ticket via `linear_gql`. If `parentId` exists → fetch parent → resolve parent branch. No parent branch → fall back to main. No parent → `TARGET_BRANCH="${GIT_BASE_BRANCH:-develop}"`.
+Check for parent ticket:
+```bash
+bash ~/.agents/skills/linear/get-issue.sh "$ARGUMENTS"
+```
+
+If `parentId` exists → fetch parent → resolve parent branch. No parent branch → fall back to main. No parent → `TARGET_BRANCH="${GIT_BASE_BRANCH:-develop}"`.
 
 ---
 
@@ -70,7 +75,11 @@ git -C "${MAIN_REPO}" push origin "${TARGET_BRANCH}"
 
 ## Phase 4 — Update Linear
 
-Move to Done via `linear_gql` `issueUpdate`. Post comment: "Approved & Merged ✅ — `${BRANCH}` → `${TARGET_BRANCH}`. Cleaned up."
+```bash
+bash ~/.agents/skills/linear/list-states.sh              # find "Done" UUID
+bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <done_uuid>
+bash ~/.agents/skills/linear/add-comment.sh "$ARGUMENTS" "Approved & Merged ✅ — \`${BRANCH}\` → \`${TARGET_BRANCH}\`. Branch + worktree cleaned up."
+```
 
 ---
 
@@ -113,3 +122,4 @@ Human Review / In Review  →  Done  (after merge + push)
 5. Delete both local and remote branches
 6. Move to Done last — only after push succeeds
 7. Never force-push protected branches
+8. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools

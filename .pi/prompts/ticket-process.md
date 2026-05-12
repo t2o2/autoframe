@@ -3,43 +3,11 @@ description: Autonomously process a Linear ticket end-to-end in an isolated git 
 argument-hint: "<ticket-id>"
 ---
 
-Process a Linear ticket: fetch → claim → implement → test → proof → push. Each ticket gets its own worktree branch.
+Process a Linear ticket: fetch → claim → implement → test → proof → push. Each ticket gets its own worktree branch. All Linear API via `~/.agents/skills/linear/` scripts.
 
 ## Request
 
 Ticket ID: $ARGUMENTS
-
----
-
-## Linear API
-
-Use `LINEAR_API_KEY` env var for all ticket operations:
-
-```bash
-linear_gql() {
-    local query="$1"
-    curl -sf \
-        -H "Authorization: ${LINEAR_API_KEY}" \
-        -H "Content-Type: application/json" \
-        -d "{\"query\": $(echo "$query" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}" \
-        https://api.linear.app/graphql
-}
-```
-
-Key operations: `issue(id:)` for details, `workflowStates(filter:{team:...})` for statuses, `issueUpdate` for status/assignee, `commentCreate` for comments, `fileUpload` + `attachmentCreate` for proof uploads.
-
----
-
-## Browser Automation
-
-Use `agent_browser` for all browser interactions:
-```
-agent_browser open http://localhost:8105
-agent_browser snapshot -i
-agent_browser screenshot /tmp/screenshots/step-1.jpg --format jpeg --quality 70
-agent_browser click "@e3"
-```
-Workflow: `open URL` → `snapshot -i` → interact via `@ref` → `screenshot path`.
 
 ---
 
@@ -71,11 +39,15 @@ HANDOFF="thoughts/tickets/$ARGUMENTS/handoff.md"
 
 ## Phase 1 — Fetch & Analyze
 
-Fetch via Linear GraphQL: issue details, workflow states, comments.
+Fetch in parallel:
+```bash
+bash ~/.agents/skills/linear/get-issue.sh "$ARGUMENTS"
+bash ~/.agents/skills/linear/list-states.sh
+```
 
 Check for plan artifact: `thoughts/tickets/$ARGUMENTS/plan.md`
 
-Parse: title, description, priority, labels, status, team ID, issue UUID, type.
+Parse: title, description, priority, labels, status, team ID.
 
 **Dependency check:** If parent exists, fetch siblings. Prerequisite in Todo/Backlog → process it first.
 
@@ -85,9 +57,12 @@ Vague description → post comment + `ask_user_question`.
 
 ## Phase 2 — Claim the Ticket
 
-1. Set state to In Progress, assign to self
-2. Post comment: "Picked up on branch `${BRANCH}`."
-3. Write handoff artifact to `thoughts/tickets/$ARGUMENTS/handoff.md`
+```bash
+bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <in_progress_uuid>
+bash ~/.agents/skills/linear/add-comment.sh "$ARGUMENTS" "Picked up on branch \`${BRANCH}\`."
+```
+
+Write initial handoff to `thoughts/tickets/$ARGUMENTS/handoff.md` with: ticket, branch, git_commit, last_completed_phase: 2, date, status: in_progress.
 
 ---
 
@@ -119,13 +94,13 @@ cd "${WORKTREE}/keeper" && npm test 2>&1
 cd "${WORKTREE}/frontend-issuance" && pnpm lint && pnpm build 2>&1 | tail -30
 ```
 
-Fix failures (up to 2 attempts). Update handoff.
+Fix failures (up to 2 attempts). Update handoff: `last_completed_phase: 5`.
 
 ---
 
 ## Phase 5b — Visual Proof (Mandatory)
 
-**No ticket moves to Review Pending without proof.**
+**No ticket moves to Review Pending without proof uploaded to Linear.**
 
 ```bash
 PROOF_DIR="/tmp/screenshots/$ARGUMENTS"
@@ -133,7 +108,14 @@ mkdir -p "${PROOF_DIR}"
 ```
 
 ### UI Tickets
-Use `agent_browser`: open → snapshot → interact → screenshot per criterion. Upload each to Linear via `fileUpload` mutation. Record `assetUrl` for completion comment.
+
+Use `agent_browser`: open → snapshot → interact → screenshot per criterion.
+
+Upload each screenshot to Linear GCS:
+1. `sips -Z 1200` to downscale
+2. `source ~/.agents/skills/linear/_lib.sh` → `linear_gql` FileUpload mutation → get `uploadUrl` + `assetUrl`
+3. `curl -X PUT` to upload
+4. Record each `ASSET_URL_STEP_N` for the completion comment
 
 Minimum: initial state, happy path, error state. Frontend fails → `ask_user_question`.
 
@@ -143,7 +125,14 @@ RESPONSE=$(curl -s -w '\n{"http_status":%{http_code}}' -X POST http://localhost:
   -H 'Content-Type: application/json' -d '[body]')
 echo "${RESPONSE}" | tee "${PROOF_DIR}/api-proof-[criterion]-happy.json"
 ```
-Upload to Linear. Verify attachment count matches.
+Upload to Linear via `_lib.sh` + `linear_gql` FileUpload mutation.
+
+### Verify
+
+```bash
+ls -la "${PROOF_DIR}/"
+```
+All proof files must exist before Phase 6.
 
 ---
 
@@ -156,7 +145,12 @@ Fixes $ARGUMENTS"
 git push -u origin "${BRANCH}"
 ```
 
-Update status to Review Pending. Post completion comment with: **branch name** (required), files changed, test summary, inline screenshots `![alt](assetUrl)`, "Next step: `/ticket-review $ARGUMENTS`".
+Update status:
+```bash
+bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <review_pending_uuid>
+```
+
+Post completion comment with: **Branch name** (required), files changed, test summary, inline screenshots `![alt]($ASSET_URL)`, API JSON blocks, "Next step: `/ticket-review $ARGUMENTS`".
 
 Worktree stays — do not remove.
 
@@ -179,3 +173,4 @@ In Progress     →  Done             (Phase 6, self-contained)
 5. Record branch name in completion comment
 6. Do not remove worktree — persists for review
 7. Visual proof mandatory — Phase 5b cannot be skipped
+8. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools. For proof uploads: `source ~/.agents/skills/linear/_lib.sh` then use `linear_gql` for FileUpload + `curl -X PUT` to GCS.

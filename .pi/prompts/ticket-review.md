@@ -3,7 +3,7 @@ description: Review a Linear ticket (input state: Review Pending) — run tests,
 argument-hint: "<ticket-id>"
 ---
 
-Review a completed ticket: tests, browser validation, proof upload, structured review comment. Move to Human Review (PASS) or Changes Required (FAIL).
+Review a completed ticket: tests, browser validation, proof upload, structured review comment. Move to Human Review (PASS) or Changes Required (FAIL). All Linear API via `~/.agents/skills/linear/` scripts.
 
 ## Request
 
@@ -13,13 +13,17 @@ Ticket ID: $ARGUMENTS
 
 ## Phase 0 — Claim & Locate Branch
 
-Fetch via `linear_gql` (bash+curl): issue details, workflow states, comments — in parallel.
+Fetch in parallel:
+```bash
+bash ~/.agents/skills/linear/get-issue.sh "$ARGUMENTS"
+bash ~/.agents/skills/linear/list-states.sh
+```
 
 Claim immediately:
+```bash
+bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <in_review_uuid>
+bash ~/.agents/skills/linear/add-comment.sh "$ARGUMENTS" "Picking up review for $ARGUMENTS."
 ```
-linear_gql issueUpdate → { id, statusId: <in_review_id> }
-```
-Post: "Picking up review for $ARGUMENTS."
 
 Find branch from comments: `**Branch:** \`feat/$ARGUMENTS\`` or `fix/`. Fallback: `git branch -r | grep "$ARGUMENTS"`.
 
@@ -93,9 +97,19 @@ mkdir -p "${PROOF_DIR}"
 ```
 
 ### UI Tickets
-Use **agent-browser**: `record start` → `open :8105` → `snapshot -i` → walk criteria → `screenshot` per step → convert JPEG (`sips -s format jpeg -Z 1200`) → upload via `linear_gql` `fileUpload` + `attachmentCreate` → record `assetUrl`.
 
-`record stop` → save to `thoughts/tickets/$ARGUMENTS/`.
+Use **agent_browser**: `open URL` → `snapshot -i` → interact via `@ref` → `screenshot path`.
+
+**Start recording:** `agent-browser record start "${PROOF_DIR}/review-recording.webm"`
+
+Walk each acceptance criterion. For each: action → snapshot → screenshot → check console.
+
+**Upload screenshots to Linear GCS:** convert to JPEG (`sips -s format jpeg -Z 1200`), then:
+1. `source ~/.agents/skills/linear/_lib.sh` → `linear_gql` FileUpload mutation → `uploadUrl` + `assetUrl`
+2. `curl -X PUT` to GCS
+3. Record `ASSET_URL_STEP_N`
+
+Stop recording, save to `thoughts/tickets/$ARGUMENTS/`.
 
 Minimum: initial state, happy path, error state. Browser failure = FAIL.
 
@@ -105,34 +119,53 @@ RESPONSE=$(curl -s -w '\n{"http_status":%{http_code}}' -X POST http://localhost:
   -H 'Content-Type: application/json' -d '[body]')
 echo "${RESPONSE}" | tee "${PROOF_DIR}/api-[criterion]-happy.json"
 ```
-Upload to Linear. Verify attachment count via `get_issue`.
+Capture: happy path, error case, state-change confirmation. Embed as code blocks.
+
+### Verify
+
+All proof files must exist and asset URLs recorded before Phase 6.
 
 ---
 
 ## Phase 6 — Verdict & Documentation
 
-**PASS** = all tests pass + no regressions + all criteria met + all proof uploaded to Linear.
+**PASS** = all tests pass + no regressions + all criteria met + all proof uploaded.
 **FAIL** = any test fails OR criterion unmet OR proof missing OR blocking bug.
 
-Post **one** review comment with: header (PASS/FAIL), files changed, acceptance criteria checklist, scope validation table, test results + full failure output, visual proof (`![alt](url)` for UI, JSON blocks for API), code review findings (file:line), reproduction steps (FAIL only), verdict.
+Post **one** comprehensive review comment via `add-comment.sh` with:
 
-Evidence standard: a fresh agent reading only ticket + comments must reproduce any failure in under 2 minutes.
+1. **Header**: PASS ✅ / FAIL ❌, reviewer, date, branch, status change
+2. **Files changed**: path + what changed
+3. **Acceptance criteria**: checklist with met/unmet
+4. **Scope validation**: claimed vs actual files table
+5. **Test results**: suite | command | outcome table + full failure output
+6. **Visual proof**: inline screenshots `![alt]($ASSET_URL)` for UI, JSON code blocks for API
+7. **Code review findings**: file:line concerns (or "No issues found")
+8. **Reproduction steps** (FAIL only): numbered steps, expected vs actual
+9. **Verdict**: 1–2 sentences why
 
-Write artifact to `thoughts/tickets/$ARGUMENTS/review.md`.
+Write review artifact to `thoughts/tickets/$ARGUMENTS/review.md`.
 
 ---
 
-## Phase 7 — Update Linear
+## Phase 7 — Update Linear Status
 
-- PASS → Human Review
-- FAIL → Changes Required
+**PASS:**
+```bash
+bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <human_review_uuid>
+```
+
+**FAIL:**
+```bash
+bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <changes_required_uuid>
+```
 
 ---
 
 ## Phase 8 — Hand Off
 
-- FAIL: inform user, leave worktree for implementer
-- PASS: "Review PASSED. System running at :8105/:8101/:8104."
+- **FAIL**: inform user, leave worktree for implementer
+- **PASS**: `ask_user_question` — "Review PASSED. System still running at :8105/:8101/:8104. Full report on Linear."
 
 Worktree NOT removed — owned by `/ticket-approve`.
 
@@ -148,11 +181,12 @@ In Review       →  Changes Required (FAIL)
 
 ## Critical Rules
 
-1. Read existing comments first — don't redo work
-2. Never PASS without running tests — can't run = FAIL
+1. Read existing comments first — don't redo completed work
+2. Never PASS without running tests — if tests can't run, FAIL
 3. Write missing tests before judging
-4. Visual proof mandatory — no exceptions. Verify via `get_issue` attachments count
-5. Screenshots as `![alt](url)` inline; API as code blocks
-6. One comprehensive comment — not incremental
-7. Never remove worktree
+4. Visual proof mandatory — no exceptions. Browser failure = FAIL
+5. Screenshots as `![alt](assetUrl)` inline; API as code blocks
+6. One comprehensive comment — not incremental updates
+7. Never remove the worktree
 8. NEVER move to Done — only valid PASS destination is Human Review
+9. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools. For proof uploads: `source ~/.agents/skills/linear/_lib.sh` then use `linear_gql` for FileUpload + `curl -X PUT` to GCS.

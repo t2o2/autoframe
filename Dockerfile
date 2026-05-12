@@ -52,10 +52,6 @@ RUN case "${TARGETARCH}" in \
     dpkg -i /tmp/wtp.deb && \
     rm /tmp/wtp.deb
 
-# Linear MCP server (uses LINEAR_API_KEY, no OAuth required)
-COPY linear-mcp /opt/linear-mcp
-RUN cd /opt/linear-mcp && npm install --omit=dev
-
 # Bake autoframe agent scripts + Claude commands into the image.
 # The entrypoint copies these into the cloned repo if setup.sh hasn't been run.
 COPY scripts /opt/autoframe/scripts

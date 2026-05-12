@@ -3,7 +3,7 @@ description: Research a Linear ticket — explore the codebase and post findings
 argument-hint: "<ticket-id>"
 ---
 
-Research a ticket: explore codebase, post structured findings, move `Todo → Research → Research Pending Approval`.
+Research a ticket: explore codebase, post structured findings, move `Todo → Research → Research Pending Approval`. All Linear API via `~/.agents/skills/linear/` scripts.
 
 ## Request
 
@@ -13,15 +13,19 @@ Ticket ID: $ARGUMENTS
 
 ## Phase 1 — Fetch & Claim
 
-Fetch via `linear_gql` (bash+curl): issue details, workflow states, comments — in parallel.
+Fetch in parallel:
+```bash
+bash ~/.agents/skills/linear/get-issue.sh "$ARGUMENTS"
+bash ~/.agents/skills/linear/list-states.sh
+```
 
-Parse: title, description, priority, labels, team ID.
+Parse: title, description, priority, labels, team ID. Comments in `.comments.nodes`.
 
 Claim:
+```bash
+bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <research_uuid>
+bash ~/.agents/skills/linear/add-comment.sh "$ARGUMENTS" "Picking up research for $ARGUMENTS."
 ```
-linear_gql issueUpdate → { statusId: <research_id> }
-```
-Post: "Picking up research for $ARGUMENTS."
 
 Vague description (< 2 actionable sentences) → `./scripts/ask-human.sh` or `ask_user_question`.
 
@@ -76,10 +80,18 @@ Scope: [trivial/small/medium/large] | Risks: [...] | Blockers: [...]
 
 ## Phase 5 — Post Research & Transition
 
-1. Post research via `linear_gql` `commentCreate`
-2. Move to Research Pending Approval via `issueUpdate`
-3. Post: "Research complete. Move to **Research Approved** to trigger planning."
-4. Write artifact to `thoughts/tickets/$ARGUMENTS/research.md`
+1. Post research:
+   ```bash
+   bash ~/.agents/skills/linear/add-comment.sh "$ARGUMENTS" "[research markdown]"
+   ```
+
+2. Transition:
+   ```bash
+   bash ~/.agents/skills/linear/update-issue.sh "$ARGUMENTS" --state-id <research_pending_approval_uuid>
+   bash ~/.agents/skills/linear/add-comment.sh "$ARGUMENTS" "Research complete. Move to **Research Approved** to trigger planning."
+   ```
+
+3. Write artifact to `thoughts/tickets/$ARGUMENTS/research.md`
 
 ---
 
@@ -98,3 +110,4 @@ Research   →  Research Pending Approval   (Phase 5)
 4. Post to Linear — research lives as ticket comment
 5. No code changes
 6. Wait for all sub-agents before synthesizing
+7. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
