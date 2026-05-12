@@ -80,9 +80,30 @@ if [[ -d "/opt/host-pi" ]]; then
     cp -r /opt/host-pi/. "${PI_AGENT_DIR}/" 2>/dev/null || true
 fi
 
-# Always overwrite settings.json with the container-safe version that only
-# references packages pre-installed in Dockerfile.pi (as root during build).
-cat > "${PI_AGENT_DIR}/settings.json" <<'JSON'
+# Generate settings.json from host config, adjusting for container environment.
+# - Provider → anthropic (host may use opencode-go or other local providers)
+# - Default model → claude-sonnet-4-6 (overridden by AGENT_TIER at runtime)
+# - Remove @juicesharp/rpiv-ask-user-question (autonomous agents don't prompt)
+HOST_SETTINGS="${PI_AGENT_DIR}/settings.json"
+if [[ -f "$HOST_SETTINGS" ]]; then
+    python3 -c "
+import json, sys
+
+cfg = json.load(open('${HOST_SETTINGS}'))
+cfg['defaultProvider'] = 'anthropic'
+cfg['defaultModel'] = 'claude-sonnet-4-6'
+# Keep host's enabledModels, theme, thinkingLevel, compaction etc.
+cfg.setdefault('defaultThinkingLevel', 'high')
+cfg.setdefault('compaction', {'enabled': True, 'reserveTokens': 16384, 'keepRecentTokens': 20000})
+# Strip interactive/blocking extensions — autonomous agents must not block
+cfg['packages'] = [p for p in cfg.get('packages', []) if 'ask-user-question' not in p and 'pi-guardrails' not in p]
+
+json.dump(cfg, open('${PI_AGENT_DIR}/settings.json', 'w'), indent=2)
+print('[entrypoint] settings.json synced from host (provider→anthropic, model→claude-sonnet-4-6, -ask_user_question)')
+"
+else
+    echo "[entrypoint] WARNING: host settings.json not found — writing container fallback"
+    cat > "${PI_AGENT_DIR}/settings.json" <<'JSON'
 {
   "defaultProvider": "anthropic",
   "defaultModel": "claude-sonnet-4-6",
@@ -91,10 +112,15 @@ cat > "${PI_AGENT_DIR}/settings.json" <<'JSON'
     "npm:pi-subagents",
     "npm:@juicesharp/rpiv-todo",
     "npm:@aliou/pi-processes",
-    "npm:@samfp/pi-memory",
+    "npm:pi-hermes-memory",
     "npm:pi-agent-browser-native",
     "npm:pi-claude-oauth-adapter",
-    "npm:pi-web-access"
+    "npm:pi-web-access",
+    "npm:pi-teams",
+    "npm:pi-discord-remote",
+    "npm:@juicesharp/rpiv-advisor",
+    "npm:context-mode",
+    "npm:pi-rtk-optimizer"
   ],
   "compaction": {
     "enabled": true,
@@ -103,10 +129,12 @@ cat > "${PI_AGENT_DIR}/settings.json" <<'JSON'
   }
 }
 JSON
-echo "[entrypoint] Pi agent settings.json written (container-safe package list)"
+    echo "[entrypoint] Pi agent settings.json written (container fallback)"
+fi
 
-# Always write models.json — caps context window to 200K for all Anthropic models.
-cat > "${PI_AGENT_DIR}/models.json" <<'JSON'
+# Keep host models.json if present (already has 200K context windows); fallback otherwise.
+if [[ ! -f "${PI_AGENT_DIR}/models.json" ]]; then
+    cat > "${PI_AGENT_DIR}/models.json" <<'JSON'
 {
   "providers": {
     "anthropic": {
@@ -118,7 +146,10 @@ cat > "${PI_AGENT_DIR}/models.json" <<'JSON'
   }
 }
 JSON
-echo "[entrypoint] Pi agent models.json written (200K context cap)"
+    echo "[entrypoint] Pi agent models.json written (fallback — 200K context cap)"
+else
+    echo "[entrypoint] Pi agent models.json kept from host config"
+fi
 
 # ── 3. Auth: OAuth token ─────────────────────────────────────────────────────
 # auth.json holds the Anthropic OAuth refresh+access tokens.

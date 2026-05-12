@@ -9,6 +9,10 @@ x-agent-base: &agent-base
       TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
   platform: linux/${DOCKER_PLATFORM:-arm64}
   working_dir: /workspace/repo
+  # Prevent OOM kills — Claude Code is memory-hungry on large repos.
+  # Exit code 137 = SIGKILL from OOM killer. Bump if you still see it.
+  mem_limit: ${AGENT_MEM_LIMIT:-8g}
+  memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
   env_file:
     - path: .env
       required: true
@@ -100,6 +104,8 @@ services:
     platform: linux/${DOCKER_PLATFORM:-arm64}
     container_name: agent-process-pi
     working_dir: /workspace/repo
+    mem_limit: ${AGENT_MEM_LIMIT:-8g}
+    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-process-pi.sh", "--once"]
     profiles: ["process-pi", "all-pi"]
     env_file:
@@ -140,6 +146,8 @@ services:
     platform: linux/${DOCKER_PLATFORM:-arm64}
     container_name: agent-research-pi
     working_dir: /workspace/repo
+    mem_limit: ${AGENT_MEM_LIMIT:-8g}
+    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-research-pi.sh"]
     profiles: ["research-pi", "all-pi"]
     env_file:
@@ -175,6 +183,8 @@ services:
     platform: linux/${DOCKER_PLATFORM:-arm64}
     container_name: agent-plan-pi
     working_dir: /workspace/repo
+    mem_limit: ${AGENT_MEM_LIMIT:-8g}
+    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-plan-pi.sh"]
     profiles: ["plan-pi", "all-pi"]
     env_file:
@@ -210,6 +220,8 @@ services:
     platform: linux/${DOCKER_PLATFORM:-arm64}
     container_name: agent-review-pi
     working_dir: /workspace/repo
+    mem_limit: ${AGENT_MEM_LIMIT:-8g}
+    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-review-pi.sh"]
     profiles: ["review-pi", "all-pi"]
     env_file:
@@ -245,6 +257,8 @@ services:
     platform: linux/${DOCKER_PLATFORM:-arm64}
     container_name: agent-approve-pi
     working_dir: /workspace/repo
+    mem_limit: ${AGENT_MEM_LIMIT:-8g}
+    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-approve-pi.sh"]
     profiles: ["approve-pi", "all-pi"]
     env_file:

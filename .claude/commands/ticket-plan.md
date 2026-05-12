@@ -4,7 +4,7 @@ runInPlanMode: false
 scope: project
 ---
 
-Create a detailed implementation plan for a Linear ticket. Reads the ticket's research comment, explores any gaps in the codebase, designs a phased plan with specific file changes and success criteria, and posts it as a ticket comment. Moves the ticket to `Plan Pending Approval`.
+Create a phased implementation plan: read research, explore gaps, design phases with file changes + success criteria, post to Linear. All Linear API via `~/.agents/skills/linear/` scripts.
 
 ## Request
 
@@ -14,236 +14,105 @@ Ticket ID: {{ARGUMENTS}}
 
 ## Phase 1 — Fetch Ticket & Research
 
-Fetch everything in parallel:
+Fetch in parallel:
+```bash
+bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}"
+bash ~/.agents/skills/linear/list-states.sh
+```
 
-1. `mcp__linear-server__get_issue` — full ticket details
-2. `mcp__linear-server__list_issue_statuses` — valid status IDs for the team
-3. `mcp__linear-server__list_comments` — find the research comment from the research agent
-
-Parse and record:
-
-- Title, description, priority, labels, team ID
-- **Research comment** — find the comment containing `## Research: {{ARGUMENTS}}` (posted by the research agent)
-- Extract from research: relevant files, patterns to follow, complexity estimate, key decisions
-
-**Check for research artifact first (preferred over comment parsing):**
-
+Check research artifact first:
 ```bash
 RESEARCH_ARTIFACT="thoughts/tickets/{{ARGUMENTS}}/research.md"
-if [ -f "$RESEARCH_ARTIFACT" ]; then
-  echo "Reading research artifact from thought store..."
-  # Read the artifact — it contains summary, relevant files, patterns, key decisions
-  # Use this as the primary research input
-else
-  echo "No research artifact found — falling back to Linear comment scan"
-fi
+[ -f "$RESEARCH_ARTIFACT" ] && echo "Reading research artifact" || echo "Scanning Linear comments for research"
 ```
 
-If neither the artifact nor a research comment exists, treat the ticket description as the only input — note the absence in the plan.
+Extract: title, description, priority, labels, team ID, research findings (relevant files, patterns, complexity, decisions).
 
-Set ticket status to `Planning` (claim it before exploring):
-
+Claim:
+```bash
+bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <planning_uuid>
+bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Starting implementation planning for {{ARGUMENTS}}."
 ```
-mcp__linear-server__save_issue → { id, statusId: <planning_id> }
-```
-
-Post a claiming comment:
-> "Starting implementation planning for {{ARGUMENTS}}. Reading research findings and exploring codebase to produce a phased plan."
 
 ---
 
 ## Phase 2 — Fill Research Gaps
 
-Using the research findings as the starting point, identify what still needs deeper investigation to write a concrete plan (e.g., exact function signatures, interface shapes, migration patterns).
+Spawn focused `Explore` agents only for genuine gaps. Prefix every sub-agent prompt with: `"MUST NOT suggest/critique/recommend. ONLY DO: <specific task>. Return file:line refs only."`
 
-Spawn focused `Explore` agents for any gaps — only what is genuinely needed. Examples:
+Examples: interface definitions, dependency maps, test patterns, migration conventions.
 
-Each sub-agent prompt must lead with its prohibition contract:
-
-- **INTERFACE AGENT** — `MUST NOT suggest improvements or flag issues. ONLY DO: Show the exact type definitions for [interface/struct] with file:line. Nothing more.`
-
-- **DEPENDENCY AGENT** — `MUST NOT critique coupling or suggest refactors. ONLY DO: List what [component X] imports and what traits/interfaces it implements. Return file:line refs per dependency. No analysis.`
-
-- **TEST PATTERN AGENT** — `MUST NOT assess quality or flag gaps. ONLY DO: Show how existing tests for [component] are structured — file path, setup helpers, fixture construction. Examples to copy, not critiques.`
-
-- **MIGRATION AGENT** — `MUST NOT suggest improvements or flag issues. ONLY DO: Find existing SQL migration files. Show naming convention and one representative example. No recommendations.`
-
-Spawn agents in parallel. Wait for **ALL** before proceeding.
-
-If research was thorough, this phase may require only 1–2 agents or none at all.
+Spawn in parallel. Wait for all. If research was thorough, may need 0–2 agents.
 
 ---
 
 ## Phase 3 — Resolve Key Decisions
 
-Before writing the plan, identify any architectural decisions that must be made:
-
-- Does the ticket fit cleanly into existing patterns, or does it require a new approach?
-- Are there multiple valid implementations — if so, which is most consistent with the codebase?
-- Does any part of the ticket scope conflict with the current architecture?
-
-If a decision genuinely requires human judgment and cannot be resolved by reading the code, ask via Telegram then proceed with the response:
-
+Identify architectural decisions. If genuinely ambiguous and needs human input:
+```bash
+./scripts/ask-human.sh {{ARGUMENTS}} "<question>" "<option1>" "<option2>"
 ```
-Bash: ./scripts/ask-human.sh {{ARGUMENTS}} "<question>" "<option1>" "<option2>" "<option3>"
-```
-
-Use the returned text as the chosen approach. If the script exits 1 (timeout), the default (option 1) was applied — note this in the plan. If the script exits 2 (no credentials), fall back to posting a Linear comment and proceeding with the most conservative approach:
-> "Planning for {{ARGUMENTS}}: key decision — [question]. Proceeding with [chosen approach] — override by moving ticket back to Planning with a comment."
+Timeout → default to option 1. No credentials → post comment, proceed conservatively.
 
 ---
 
 ## Phase 4 — Write the Implementation Plan
 
-Write a phased plan where each phase is independently testable and deployable. Keep phases small.
+Phased plan — each phase independently testable. Structure:
 
 ```markdown
-## Implementation Plan: {{ARGUMENTS}} — [Ticket Title]
-
-**Ticket:** [title]
-**Type:** [bug / feature / improvement / chore]
-**Planned:** [ISO date]
-**Estimated scope:** [trivial / small / medium / large]
-**Research:** [link to research comment, or "none — working from ticket description"]
+## Implementation Plan: {{ARGUMENTS}} — [Title]
 
 ### Overview
-[2–3 sentences: what we're building, the approach chosen, and why it fits the codebase]
+[2–3 sentences: approach + rationale]
 
 ### What We're NOT Doing
-[Explicit scope boundaries — prevents implementation drift]
-- [out-of-scope item]
-- [out-of-scope item]
+[Explicit scope boundaries]
 
----
-
-### Phase 1 — [Descriptive name, e.g., "Database migration"]
-
-**Goal:** [what this phase achieves in one sentence]
-
-**Files to change:**
-
-| File | Change description |
-|------|--------------------|
-| `path/to/file.rs` | [what to add/modify and why] |
-| `migrations/YYYYMMDD_name.sql` | [schema change] |
-
-**Implementation notes:**
-[Specific guidance: function signatures to add, trait implementations needed, patterns to follow. Include file:line refs to examples.]
-
-**Success criteria:**
-
-Automated:
-- [ ] `cargo test --all` passes
-- [ ] `cargo clippy --all-targets --all-features` clean
-- [ ] [specific test or curl command for this phase's change]
-
-Manual:
-- [ ] [observable behaviour to verify in the UI or via API]
-
----
-
-### Phase 2 — [Descriptive name, e.g., "Service layer"]
-
-[Same structure as Phase 1]
-
----
-
-### Phase N — [Descriptive name, e.g., "Frontend integration"]
-
-[Same structure]
-
----
+### Phase N — [Name]
+**Goal:** [one sentence]
+**Files:** path → change description
+**Success criteria:** automated checks + manual verification
 
 ### Testing Strategy
-
-**Unit tests to add:**
-- `path/to/tests.rs` — [behaviour to test, including edge cases]
-
-**Integration tests:**
-- [scenario description and how to trigger it]
-
-**Regression risk:**
-- [component that could regress, and how to verify it didn't]
+Unit tests to add, integration tests, regression risks.
 
 ### Rollback Notes
-[How to undo if something goes wrong — SQL rollback, feature flag, revert commit]
-
-### References
-- Ticket: {{ARGUMENTS}}
-- Research comment: [description of where to find it]
-- Similar implementation: `path/to/similar.rs:42`
+[How to undo]
 ```
 
 ---
 
 ## Phase 5 — Post Plan & Transition
 
-1. Post the full implementation plan as a ticket comment:
-
-   `mcp__linear-server__save_comment` → `{ issue: "{{ARGUMENTS}}", body: <plan> }`
-
-2. Set ticket status to `Plan Pending Approval`:
-
-   `mcp__linear-server__save_issue` → `{ id, statusId: <pending_plan_approval_id> }`
-
-3. Post a final summary comment:
-   > "Implementation plan posted above. **Next step:** review the plan and move ticket to **Plan Approved** to trigger the coding agent (`/ticket-process`)."
-
-4. Write plan artifact to the persistent thought store:
-
+1. Post plan as comment:
    ```bash
-   mkdir -p "thoughts/tickets/{{ARGUMENTS}}"
+   bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "[plan markdown]"
    ```
 
-   Write to `thoughts/tickets/{{ARGUMENTS}}/plan.md`:
-
-   ```markdown
-   ---
-   ticket: {{ARGUMENTS}}
-   title: [ticket title]
-   type: [bug / feature / improvement / chore]
-   planned: [ISO date]
-   status: pending_approval
-   estimated_scope: [trivial / small / medium / large]
-   phases: [number of phases]
-   ---
-
-   ## Overview
-   [copy from plan — 2–3 sentences on approach]
-
-   ## What We're NOT Doing
-   [copy scope boundaries]
-
-   ## Phase Checklist
-   - [ ] Phase 1 — [name]: [goal in one sentence] | Files: [comma-separated file list]
-   - [ ] Phase 2 — [name]: [goal in one sentence] | Files: [comma-separated file list]
-   [continue for all phases]
-
-   ## Key Files
-   [list of files to change with brief descriptions]
-
-   ## Testing Strategy
-   [copy from plan]
+2. Move to Plan Pending Approval:
+   ```bash
+   bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <plan_pending_approval_uuid>
+   bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Plan posted. Move to **Plan Approved** to trigger coding agent."
    ```
 
-   This artifact is read by `/ticket-process` to skip Linear comment re-parsing and enforce the approved scope.
+3. Write artifact to `thoughts/tickets/{{ARGUMENTS}}/plan.md` with: overview, scope boundaries, phase checklist, key files, testing strategy.
 
 ---
 
 ## Status Transitions
 
 ```
-Research Approved  →  Planning              (Phase 1 — claim)
+Research Approved  →  Planning              (Phase 1)
 Planning           →  Plan Pending Approval (Phase 5)
 ```
 
 ## Critical Rules
 
-1. **Read research first** — extract all prior findings before any codebase exploration
-2. **Phases must be independently testable** — each phase has its own success criteria
-3. **Concrete file references** — every planned change must name the exact file path
-4. **No implementation** — this command produces a plan only; zero code changes are made
-5. **Post to Linear** — the plan lives as a ticket comment, not just local context
-6. **Explicit scope boundary** — always include a "What We're NOT Doing" section
-
-
+1. Read research first — extract all prior findings before exploring
+2. Phases must be independently testable
+3. Concrete file references — every change names the exact path
+4. No implementation — plan only, zero code changes
+5. Post to Linear — plan lives as a ticket comment
+6. Explicit scope boundary — always include "What We're NOT Doing"
+7. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools

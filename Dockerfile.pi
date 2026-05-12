@@ -44,16 +44,22 @@ RUN npm install -g \
     agent-browser \
     && npm cache clean --force
 
-# Pi packages — pre-install globally so the container settings.json can reference them
-# These mirror the host ~/.pi/agent/settings.json "packages" list
+# Pi packages — pre-install globally so the container settings.json can reference them.
+# Synced from host ~/.pi/agent/settings.json "packages" list.
+# Excludes @juicesharp/rpiv-ask-user-question (autonomous agents don't need prompts).
 RUN npm install -g \
     pi-subagents \
     @juicesharp/rpiv-todo \
     @aliou/pi-processes \
-    @samfp/pi-memory \
+    pi-hermes-memory \
     pi-agent-browser-native \
     pi-claude-oauth-adapter \
     pi-web-access \
+    pi-teams \
+    pi-discord-remote \
+    @juicesharp/rpiv-advisor \
+    context-mode \
+    pi-rtk-optimizer \
     && npm cache clean --force
 
 # wtp — architecture-aware installation

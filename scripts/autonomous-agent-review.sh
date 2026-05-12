@@ -673,7 +673,7 @@ run_build_check() {
     local build_ok=0
     (
         cd "$build_dir"
-        cargo build --profile dev-fast --workspace 2>&1
+        cargo build -j 2 --profile dev-fast --workspace 2>&1
     ) | tee -a "$log_file" | tail -20 || build_ok=1
 
     # Clean up temp worktree

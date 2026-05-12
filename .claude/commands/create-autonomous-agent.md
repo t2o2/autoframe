@@ -6,6 +6,8 @@ scope: project
 
 Scaffold a complete autonomous agent: shell polling script, ticket command definition, and updates to `setup.sh` and `README.md`.
 
+**Uses the Linear skill (`~/.agents/skills/linear/`) for all Linear API interactions in generated templates.**
+
 ## Request
 
 {{ARGUMENTS}}
@@ -47,7 +49,7 @@ Default phase template to propose (adapt to the agent's purpose):
 
 ```
 Phase 1 — Fetch & Claim
-  - Fetch ticket details, statuses, comments in parallel
+  - Fetch ticket details, statuses via Linear skill scripts
   - Set status to "{working_status}"
   - Post a claiming comment
 
@@ -84,6 +86,8 @@ scope: project
 
 {One paragraph description of what this command does and its place in the pipeline.}
 
+**Uses the Linear skill (`~/.agents/skills/linear/`) for all Linear API interactions.**
+
 ## Request
 
 Ticket ID: {{ARGUMENTS}}
@@ -92,19 +96,25 @@ Ticket ID: {{ARGUMENTS}}
 
 ## Phase 1 — Fetch & Claim
 
-Fetch everything in parallel:
+Fetch ticket details (includes comments) and workflow states:
 
-1. `mcp__linear-server__get_issue` — full ticket details
-2. `mcp__linear-server__list_issue_statuses` — valid status IDs for the team
-3. `mcp__linear-server__list_comments` — prior discussion
+\```bash
+bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}"
+bash ~/.agents/skills/linear/list-states.sh
+\```
 
 Set status to `{working_status}`:
 
-\```
-mcp__linear-server__save_issue → { id, statusId: <{working_status_snake}_id> }
+\```bash
+# Find the "{working_status}" state UUID from list-states.sh output, then:
+bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <{working_status}_uuid>
 \```
 
-Post a claiming comment describing what will happen.
+Post a claiming comment describing what will happen:
+
+\```bash
+bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "[Claiming message]"
+\```
 
 ---
 
@@ -117,10 +127,18 @@ Post a claiming comment describing what will happen.
 ## Phase N — Post Output & Transition
 
 1. Post the results as a ticket comment:
-   `mcp__linear-server__save_comment` → `{ issue: "{{ARGUMENTS}}", body: <output> }`
+   \```bash
+   bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "$(cat <<'OUTPUT'
+   [output markdown]
+   OUTPUT
+   )"
+   \```
 
 2. Set ticket status to `{done_status}`:
-   `mcp__linear-server__save_issue` → `{ id, statusId: <{done_status_snake}_id> }`
+   \```bash
+   # Find the "{done_status}" state UUID from list-states.sh output, then:
+   bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <{done_status}_uuid>
+   \```
 
 3. Post a next-step comment indicating what the human or next agent should do.
 
@@ -140,6 +158,7 @@ Post a claiming comment describing what will happen.
 3. **No code changes** — if this is a read/analysis agent
 4. **Post to Linear** — output lives as ticket comments
 5. **Claim before working** — set `{working_status}` as the very first mutation
+6. **Use the Linear skill** — all Linear API interactions go through `~/.agents/skills/linear/` scripts, not MCP tool calls.
 
 ## Orchestration Map
 
@@ -148,15 +167,15 @@ Post a claiming comment describing what will happen.
         │
         ▼
 Phase 1: Fetch & Claim
-  [parallel fetches] → save_issue: {working_status}
+  get-issue.sh + list-states.sh → update-issue.sh: {working_status}
         │
         ▼
 Phase 2: [Core work]
         │
         ▼
 Phase N: Post & Transition
-  save_comment: output
-  save_issue: {done_status}
+  add-comment.sh: output
+  update-issue.sh: {done_status}
 \```
 ```
 
@@ -260,3 +279,4 @@ Next steps:
 3. **Follow the canonical shell script pattern exactly** — use `LINEAR_TEAM_KEY`, generic ticket regex, watchdog, heartbeat, signal handlers
 4. **Wire everything** — a new agent is only complete when setup.sh and README.md are updated
 5. **Make the script executable** — `chmod +x` immediately after writing
+6. **Use the Linear skill in templates** — generated command files must reference `~/.agents/skills/linear/` scripts, not MCP tool calls.
