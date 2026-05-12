@@ -22,6 +22,7 @@ LOG_DIR="$SCRIPT_DIR/autonomous-approve-pi-logs"
 PROCESSED_FILE="/tmp/autonomous-approve-pi-processed.txt"
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+AUTO_RULES="$SCRIPT_DIR/autonomous-process-rules.md"
 if [[ -z "${LINEAR_API_KEY:-}" && -f "$REPO_ROOT/.env" ]]; then
     LINEAR_API_KEY="$(grep -E '^LINEAR_API_KEY=' "$REPO_ROOT/.env" | cut -d= -f2 | cut -d' ' -f1)"
 fi
@@ -31,6 +32,7 @@ fi
 
 POLL_INTERVAL=60
 HEARTBEAT_INTERVAL=30
+MAX_CONTINUATIONS=3
 RUN_ONCE=false
 RESET_CACHE=false
 
@@ -446,7 +448,6 @@ PIPELINE_PID=""
 
 process_ticket() {
     local ticket_id="$1"
-    local log_file="$LOG_DIR/${ticket_id}-$(date '+%Y%m%d-%H%M%S').log"
     local exit_code=0
 
     local lock_dir="/tmp/approve-pi-lock-${ticket_id}"
@@ -460,62 +461,101 @@ process_ticket() {
     echo "$REVERT_STATE" > "$HB_FILE"
     trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}'" RETURN
 
+    # Session directory for this ticket — enables --continue across attempts
+    local session_dir="$LOG_DIR/sessions/${ticket_id}"
+    mkdir -p "$session_dir"
+
     divider "═" "Approving (pi): $ticket_id"
     log WORK "Ticket  : $ticket_id"
-    log WORK "Log     : $log_file"
+    log WORK "Session : $session_dir"
     log WORK "Started : $(date '+%Y-%m-%d %H:%M:%S')"
     divider
     echo ""
 
-    start_heartbeat "$ticket_id" "$HB_FILE"
+    # ── Continuation loop ─────────────────────────────────────────────────────
+    local attempt=0
 
-    # ── Pi invocation ─────────────────────────────────────────────────────────
-    # --no-session : ephemeral, no session file written
-    # --mode json  : stream events as JSON lines → parsed by PROCESSOR
-    # Model comes from PI_DEFAULT_MODEL (set in entrypoint) or settings.json
-    (
-        pi \
-            --no-session \
-            --mode json \
-            ${PI_DEFAULT_MODEL:+--model "$PI_DEFAULT_MODEL"} \
-            "/ticket-approve ${ticket_id}" \
-            2>&1
-    ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
-    PIPELINE_PID=$!
+    while true; do
+        attempt=$((attempt + 1))
+        local log_file="$LOG_DIR/${ticket_id}-$(date '+%Y%m%d-%H%M%S').log"
+        echo "$REVERT_STATE" > "$HB_FILE"
 
-    start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID"
-    start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" \
-        "Merging"
+        start_heartbeat "$ticket_id" "$HB_FILE"
 
-    wait "$PIPELINE_PID"
-    exit_code=$?
-    PIPELINE_PID=""
+        if (( attempt == 1 )); then
+            log INFO "Starting fresh session for $ticket_id"
+            (
+                pi \
+                    --session-dir "$session_dir" \
+                    --append-system-prompt "$AUTO_RULES" \
+                    --mode json \
+                    ${PI_DEFAULT_MODEL:+--model "$PI_DEFAULT_MODEL"} \
+                    "/ticket-approve ${ticket_id}" \
+                    2>&1
+            ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
+        else
+            local cur_state
+            cur_state=$(get_ticket_state "$ticket_id" 2>/dev/null) || cur_state="unknown"
+            log INFO "Continuing session for $ticket_id (attempt $attempt/$((MAX_CONTINUATIONS + 1)), state: $cur_state)"
+            (
+                pi \
+                    --session-dir "$session_dir" \
+                    --continue \
+                    --append-system-prompt "$AUTO_RULES" \
+                    --mode json \
+                    ${PI_DEFAULT_MODEL:+--model "$PI_DEFAULT_MODEL"} \
+                    "Your session ended but ticket ${ticket_id} is still in '${cur_state}' — it has NOT been completed. Background processes from your previous attempt are no longer running. Review what you have done so far and continue from where you left off. IMPORTANT: Do NOT use the process tool without alertOnSuccess: true — your session will end before background results arrive." \
+                    2>&1
+            ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
+        fi
+        PIPELINE_PID=$!
 
-    stop_status_watcher
-    stop_stale_watchdog
+        start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID"
+        start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" \
+            "Merging"
+
+        wait "$PIPELINE_PID"
+        exit_code=$?
+        PIPELINE_PID=""
+
+        stop_status_watcher
+        stop_stale_watchdog
+        stop_heartbeat
+
+        # Clean up any in-progress git operations left behind
+        if [[ -d "${REPO_ROOT}/.git" ]]; then
+            git -C "$REPO_ROOT" rebase --abort 2>/dev/null || true
+            git -C "$REPO_ROOT" merge --abort 2>/dev/null || true
+            git -C "$REPO_ROOT" cherry-pick --abort 2>/dev/null || true
+        fi
+
+        local final_state=""
+        if [[ -n "${LINEAR_API_KEY:-}" ]]; then
+            final_state=$(get_ticket_state "$ticket_id") || final_state=""
+        fi
+
+        if [[ -n "$final_state" \
+              && "$final_state" != "In Progress" \
+              && "$final_state" != "Merging" ]]; then
+            log OK "✓ $ticket_id advanced to '$final_state' on attempt $attempt"
+            break
+        fi
+
+        if (( attempt > MAX_CONTINUATIONS )); then
+            log WARN "$ticket_id: exhausted $MAX_CONTINUATIONS continuation(s) — giving up"
+            if [[ "$final_state" == "Merging" || "$final_state" == "In Progress" ]]; then
+                log WARN "$ticket_id still '$final_state' — reverting to '$REVERT_STATE'"
+                revert_ticket_status "$ticket_id" "$REVERT_STATE"
+            fi
+            break
+        fi
+
+        log INFO "$ticket_id still in '$final_state' after attempt $attempt — continuing session in 5s..."
+        sleep 5
+    done
+
     rm -f "$HB_FILE"
     rmdir "$lock_dir" 2>/dev/null || true
-
-    # Clean up any in-progress git operations (rebase, merge, cherry-pick) that
-    # may have been left behind if the pipeline was killed mid-operation.
-    if [[ -d "${REPO_ROOT}/.git" ]]; then
-        git -C "$REPO_ROOT" rebase --abort 2>/dev/null || true
-        git -C "$REPO_ROOT" merge --abort 2>/dev/null || true
-        git -C "$REPO_ROOT" cherry-pick --abort 2>/dev/null || true
-    fi
-
-    # Post-exit revert: if /ticket-approve didn't move ticket out of Merging (rebase
-    # conflict, push failure, etc.), kick it back to Human Review for the author.
-    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
-        local final_state
-        final_state=$(get_ticket_state "$ticket_id") || final_state=""
-        if [[ "$final_state" == "Merging" || "$final_state" == "In Progress" ]]; then
-            log WARN "$ticket_id still '$final_state' after exit — reverting to '$REVERT_STATE'"
-            revert_ticket_status "$ticket_id" "$REVERT_STATE"
-        fi
-    fi
-
-    stop_heartbeat
 
     echo ""
     if [[ $exit_code -eq 0 ]]; then
@@ -526,9 +566,11 @@ process_ticket() {
 
     if ticket_still_actionable "$ticket_id"; then
         log WARN "  $ticket_id still 'Merging' — will retry next poll"
+        rm -rf "$session_dir"
     else
         echo "$ticket_id" >> "$PROCESSED_FILE"
         log INFO "  $ticket_id status advanced — cached"
+        rm -rf "$session_dir"
     fi
 
     echo ""
