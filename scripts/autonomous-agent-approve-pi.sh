@@ -456,14 +456,7 @@ process_ticket() {
     fi
 
     local HB_FILE="/tmp/approve-pi-heartbeat-${ticket_id}.txt"
-    local REVERT_STATE="Merging"
-    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
-        local _cur_state
-        _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""
-        if [[ "$_cur_state" == "Merging" ]]; then
-            REVERT_STATE="$_cur_state"
-        fi
-    fi
+    local REVERT_STATE="Human Review"
     echo "$REVERT_STATE" > "$HB_FILE"
     trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}'" RETURN
 
@@ -503,12 +496,21 @@ process_ticket() {
     rm -f "$HB_FILE"
     rmdir "$lock_dir" 2>/dev/null || true
 
-    # Post-exit revert if ticket still stuck In Progress
+    # Clean up any in-progress git operations (rebase, merge, cherry-pick) that
+    # may have been left behind if the pipeline was killed mid-operation.
+    if [[ -d "${REPO_ROOT}/.git" ]]; then
+        git -C "$REPO_ROOT" rebase --abort 2>/dev/null || true
+        git -C "$REPO_ROOT" merge --abort 2>/dev/null || true
+        git -C "$REPO_ROOT" cherry-pick --abort 2>/dev/null || true
+    fi
+
+    # Post-exit revert: if /ticket-approve didn't move ticket out of Merging (rebase
+    # conflict, push failure, etc.), kick it back to Human Review for the author.
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local final_state
         final_state=$(get_ticket_state "$ticket_id") || final_state=""
-        if [[ "$final_state" == "In Progress" ]]; then
-            log WARN "$ticket_id still 'In Progress' after exit — reverting to '$REVERT_STATE'"
+        if [[ "$final_state" == "Merging" || "$final_state" == "In Progress" ]]; then
+            log WARN "$ticket_id still '$final_state' after exit — reverting to '$REVERT_STATE'"
             revert_ticket_status "$ticket_id" "$REVERT_STATE"
         fi
     fi
@@ -523,7 +525,7 @@ process_ticket() {
     fi
 
     if ticket_still_actionable "$ticket_id"; then
-        log WARN "  $ticket_id still in Human Review — will retry next poll"
+        log WARN "  $ticket_id still 'Merging' — will retry next poll"
     else
         echo "$ticket_id" >> "$PROCESSED_FILE"
         log INFO "  $ticket_id status advanced — cached"

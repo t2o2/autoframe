@@ -33,6 +33,13 @@ mkdir -p /workspace
 
 if [[ -d "$WORKSPACE/.git" ]]; then
     echo "[entrypoint] Repo already present — fetching latest"
+    # Clean any leftover in-progress git operations (rebase, merge, cherry-pick)
+    # that may have been left behind if a previous agent was killed mid-operation.
+    git -C "$WORKSPACE" rebase --abort 2>/dev/null || true
+    git -C "$WORKSPACE" merge --abort 2>/dev/null || true
+    git -C "$WORKSPACE" cherry-pick --abort 2>/dev/null || true
+    git -C "$WORKSPACE" checkout -- . 2>/dev/null || true
+    git -C "$WORKSPACE" clean -fd 2>/dev/null || true
     git -C "$WORKSPACE" fetch --all --prune 2>&1 || {
         git -C "$WORKSPACE" pack-refs --all
         git -C "$WORKSPACE" fetch --all --prune 2>&1 || true

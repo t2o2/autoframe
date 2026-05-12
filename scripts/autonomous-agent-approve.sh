@@ -592,7 +592,7 @@ approve_ticket() {
         return
     fi
     local HB_FILE="/tmp/approve-heartbeat-${ticket_id}.txt"
-    echo "Merging" > "$HB_FILE"
+    echo "Human Review" > "$HB_FILE"
     # Release lock and heartbeat file on function exit (success, error, or return)
     trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}'" RETURN
 
@@ -615,7 +615,7 @@ approve_ticket() {
     ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
     PIPELINE_PID=$!
 
-    start_stale_watchdog "$ticket_id" "$HB_FILE" "Merging" "$PIPELINE_PID"
+    start_stale_watchdog "$ticket_id" "$HB_FILE" "Human Review" "$PIPELINE_PID"
     start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" "Merging"
 
     wait "$PIPELINE_PID"
@@ -626,6 +626,25 @@ approve_ticket() {
     stop_stale_watchdog
     rm -f "$HB_FILE"
     rmdir "$lock_dir" 2>/dev/null || true
+
+    # Clean up any in-progress git operations (rebase, merge, cherry-pick) that
+    # may have been left behind if the pipeline was killed mid-operation.
+    if [[ -d "${REPO_ROOT}/.git" ]]; then
+        git -C "$REPO_ROOT" rebase --abort 2>/dev/null || true
+        git -C "$REPO_ROOT" merge --abort 2>/dev/null || true
+        git -C "$REPO_ROOT" cherry-pick --abort 2>/dev/null || true
+    fi
+
+    # Post-exit revert: if /ticket-approve didn't move ticket out of Merging (rebase
+    # conflict, push failure, etc.), kick it back to Human Review for the author.
+    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
+        local final_state
+        final_state=$(get_ticket_state "$ticket_id") || final_state=""
+        if [[ "$final_state" == "Merging" || "$final_state" == "In Progress" ]]; then
+            log WARN "$ticket_id still '$final_state' after exit — reverting to 'Human Review'"
+            revert_ticket_status "$ticket_id" "Human Review"
+        fi
+    fi
 
     stop_heartbeat
 
