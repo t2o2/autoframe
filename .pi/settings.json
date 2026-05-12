@@ -1,0 +1,39 @@
+{
+  "packages": [
+    {
+      "source": "npm:@juicesharp/rpiv-ask-user-question",
+      "extensions": [],
+      "skills": []
+    },
+    {
+      "source": "npm:@aliou/pi-processes",
+      "extensions": [],
+      "skills": []
+    },
+    {
+      "source": "npm:pi-teams",
+      "extensions": [],
+      "skills": []
+    },
+    {
+      "source": "npm:pi-discord-remote",
+      "extensions": [],
+      "skills": []
+    },
+    {
+      "source": "npm:pi-agent-browser-native",
+      "extensions": [],
+      "skills": []
+    },
+    {
+      "source": "npm:pi-claude-oauth-adapter",
+      "extensions": [],
+      "skills": []
+    },
+    {
+      "source": "npm:pi-subagents",
+      "extensions": [],
+      "skills": []
+    }
+  ]
+}
