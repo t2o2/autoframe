@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # autonomous-agent-research-pi.sh
 #
-# Pi-native version of the process agent.
-# Polls Linear for "Plan Approved" and "Changes Required" tickets, then processes
-# them one-by-one using the /ticket-process pi prompt template.
+# Pi-native version of the research agent.
+# Polls Linear for "Todo" tickets, then researches them one-by-one using
+# the /ticket-research pi prompt template.
 #
 # Usage:
 #   ./scripts/autonomous-agent-research-pi.sh [--poll-interval <seconds>] [--once] [--reset]
@@ -251,7 +251,7 @@ linear_gql() {
 }
 
 fetch_pending_tickets() {
-    log INFO "Querying Linear for 'Plan Approved' and 'Change Required' tickets..."
+    log INFO "Querying Linear for 'Todo' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -260,7 +260,7 @@ fetch_pending_tickets() {
     fi
 
     local response
-    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Plan Approved\",\"Change Required\"]}}}) { nodes { identifier } } }")
+    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Todo\"]}}}) { nodes { identifier } } }")
 
     if [[ -z "$response" ]]; then
         log WARN "Linear API call failed — will retry next cycle"
@@ -325,7 +325,7 @@ ticket_still_actionable() {
     local ticket_id="$1"
     local state
     state=$(get_ticket_state "$ticket_id") || return 1
-    [[ "$state" == "Plan Approved" || "$state" == "Change Required" ]]
+    [[ "$state" == "Todo" ]]
 }
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────

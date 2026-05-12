@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # autonomous-agent-review-pi.sh
 #
-# Pi-native version of the process agent.
-# Polls Linear for "Plan Approved" and "Changes Required" tickets, then processes
-# them one-by-one using the /ticket-process pi prompt template.
+# Pi-native version of the review agent.
+# Polls Linear for "Review Pending" tickets, then reviews them one-by-one using
+# the /ticket-review pi prompt template.
 #
 # Usage:
 #   ./scripts/autonomous-agent-review-pi.sh [--poll-interval <seconds>] [--once] [--reset]
@@ -251,7 +251,7 @@ linear_gql() {
 }
 
 fetch_pending_tickets() {
-    log INFO "Querying Linear for 'Plan Approved' and 'Change Required' tickets..."
+    log INFO "Querying Linear for 'Review Pending' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -260,7 +260,7 @@ fetch_pending_tickets() {
     fi
 
     local response
-    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Plan Approved\",\"Change Required\"]}}}) { nodes { identifier } } }")
+    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Review Pending\"]}}}) { nodes { identifier } } }")
 
     if [[ -z "$response" ]]; then
         log WARN "Linear API call failed — will retry next cycle"
@@ -325,7 +325,7 @@ ticket_still_actionable() {
     local ticket_id="$1"
     local state
     state=$(get_ticket_state "$ticket_id") || return 1
-    [[ "$state" == "Plan Approved" || "$state" == "Change Required" ]]
+    [[ "$state" == "Review Pending" ]]
 }
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────
@@ -456,7 +456,7 @@ process_ticket() {
     fi
 
     local HB_FILE="/tmp/review-pi-heartbeat-${ticket_id}.txt"
-    local REVERT_STATE="Plan Approved"
+    local REVERT_STATE="Review Pending"
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local _cur_state
         _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""
@@ -522,6 +522,48 @@ process_ticket() {
         log WARN "⚠  Exit code ${exit_code} for $ticket_id"
     fi
 
+    # ── Verdict detection from log ────────────────────────────────────────
+    local verdict="unknown"
+    if grep -qi '\bPASS\b' "$log_file" 2>/dev/null && ! grep -qi '\bFAIL\b' "$log_file" 2>/dev/null; then
+        verdict="PASS"
+    elif grep -qi '\bFAIL\b' "$log_file" 2>/dev/null; then
+        verdict="FAIL"
+    fi
+
+    if [[ "$verdict" != "unknown" && -n "${LINEAR_API_KEY:-}" ]]; then
+        local target_state=""
+        case "$verdict" in
+            PASS) target_state="Human Review" ;;
+            FAIL) target_state="Changes Required" ;;
+        esac
+        if [[ -n "$target_state" ]]; then
+            revert_ticket_status "$ticket_id" "$target_state"
+        fi
+    fi
+
+    case "$verdict" in
+        PASS)
+            echo ""
+            echo -e "${GREEN}${BOLD}  ╔══════════════════════════════════════════════════════╗${RESET}"
+            echo -e "${GREEN}${BOLD}  ║  ✅  PASS — ticket moved to Human Review             ║${RESET}"
+            echo -e "${GREEN}${BOLD}  ╚══════════════════════════════════════════════════════╝${RESET}"
+            echo ""
+            log PASS "Review PASSED for $ticket_id — moved to Human Review"
+            ;;
+        FAIL)
+            echo ""
+            echo -e "${RED}${BOLD}  ╔══════════════════════════════════════════════════════╗${RESET}"
+            echo -e "${RED}${BOLD}  ║  ❌  FAIL — ticket moved to Changes Required         ║${RESET}"
+            echo -e "${RED}${BOLD}  ╚══════════════════════════════════════════════════════╝${RESET}"
+            echo ""
+            log FAIL "Review FAILED for $ticket_id — moved to Changes Required"
+            ;;
+        *)
+            log WARN "Verdict unclear for $ticket_id — check log: $log_file"
+            ;;
+    esac
+
+    # ── Conditional cache ─────────────────────────────────────────────────
     if ticket_still_actionable "$ticket_id"; then
         log WARN "  $ticket_id still in Review Pending — will retry next poll"
     else

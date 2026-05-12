@@ -251,7 +251,7 @@ linear_gql() {
 }
 
 fetch_pending_tickets() {
-    log INFO "Querying Linear for 'Plan Approved' and 'Change Required' tickets..."
+    log INFO "Querying Linear for 'Plan Approved' and 'Changes Required' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -260,7 +260,7 @@ fetch_pending_tickets() {
     fi
 
     local response
-    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Plan Approved\",\"Change Required\"]}}}) { nodes { identifier } } }")
+    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Plan Approved\",\"Changes Required\"]}}}) { nodes { identifier } } }")
 
     if [[ -z "$response" ]]; then
         log WARN "Linear API call failed — will retry next cycle"
@@ -325,7 +325,7 @@ ticket_still_actionable() {
     local ticket_id="$1"
     local state
     state=$(get_ticket_state "$ticket_id") || return 1
-    [[ "$state" == "Plan Approved" || "$state" == "Change Required" ]]
+    [[ "$state" == "Plan Approved" || "$state" == "Changes Required" ]]
 }
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────
@@ -460,7 +460,7 @@ process_ticket() {
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local _cur_state
         _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""
-        if [[ "$_cur_state" == "Plan Approved" || "$_cur_state" == "Change Required" ]]; then
+        if [[ "$_cur_state" == "Plan Approved" || "$_cur_state" == "Changes Required" ]]; then
             REVERT_STATE="$_cur_state"
         fi
     fi
@@ -492,7 +492,7 @@ process_ticket() {
 
     start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID"
     start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" \
-        "Plan Approved:Change Required:In Progress"
+        "Plan Approved:Changes Required:In Progress"
 
     wait "$PIPELINE_PID"
     exit_code=$?
@@ -523,7 +523,7 @@ process_ticket() {
     fi
 
     if ticket_still_actionable "$ticket_id"; then
-        log WARN "  $ticket_id still in Plan Approved/Change Required — will retry next poll"
+        log WARN "  $ticket_id still in Plan Approved/Changes Required — will retry next poll"
     else
         echo "$ticket_id" >> "$PROCESSED_FILE"
         log INFO "  $ticket_id status advanced — cached"

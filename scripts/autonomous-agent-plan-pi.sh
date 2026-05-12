@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # autonomous-agent-plan-pi.sh
 #
-# Pi-native version of the process agent.
-# Polls Linear for "Plan Approved" and "Changes Required" tickets, then processes
-# them one-by-one using the /ticket-process pi prompt template.
+# Pi-native version of the plan agent.
+# Polls Linear for "Research Approved" tickets, then creates plans for them
+# one-by-one using the /ticket-plan pi prompt template.
 #
 # Usage:
 #   ./scripts/autonomous-agent-plan-pi.sh [--poll-interval <seconds>] [--once] [--reset]
@@ -251,7 +251,7 @@ linear_gql() {
 }
 
 fetch_pending_tickets() {
-    log INFO "Querying Linear for 'Plan Approved' and 'Change Required' tickets..."
+    log INFO "Querying Linear for 'Research Approved' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -260,7 +260,7 @@ fetch_pending_tickets() {
     fi
 
     local response
-    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Plan Approved\",\"Change Required\"]}}}) { nodes { identifier } } }")
+    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Research Approved\"]}}}) { nodes { identifier } } }")
 
     if [[ -z "$response" ]]; then
         log WARN "Linear API call failed — will retry next cycle"
@@ -325,7 +325,7 @@ ticket_still_actionable() {
     local ticket_id="$1"
     local state
     state=$(get_ticket_state "$ticket_id") || return 1
-    [[ "$state" == "Plan Approved" || "$state" == "Change Required" ]]
+    [[ "$state" == "Research Approved" ]]
 }
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────
@@ -456,7 +456,7 @@ process_ticket() {
     fi
 
     local HB_FILE="/tmp/plan-pi-heartbeat-${ticket_id}.txt"
-    local REVERT_STATE="Plan Approved"
+    local REVERT_STATE="Research Approved"
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local _cur_state
         _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""

@@ -293,7 +293,7 @@ interruptible_sleep() {
 # ── Linear query ──────────────────────────────────────────────────────────────
 
 fetch_pending_tickets() {
-    log INFO "Querying Linear for 'Plan Approved' and 'Change Required' tickets..."
+    log INFO "Querying Linear for 'Plan Approved' and 'Changes Required' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -305,7 +305,7 @@ fetch_pending_tickets() {
     response=$(curl -sf \
         -H "Authorization: ${LINEAR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${LINEAR_TEAM_KEY}\\\"}},state:{name:{in:[\\\"Plan Approved\\\",\\\"Change Required\\\"]}}}) { nodes { identifier } } }\"}" \
+        -d "{\"query\":\"{ issues(filter:{team:{key:{eq:\\\"${LINEAR_TEAM_KEY}\\\"}},state:{name:{in:[\\\"Plan Approved\\\",\\\"Changes Required\\\"]}}}) { nodes { identifier } } }\"}" \
         https://api.linear.app/graphql 2>/dev/null)
 
     if [[ $? -ne 0 || -z "$response" ]]; then
@@ -360,7 +360,7 @@ nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
 print(nodes[0]['state']['name'] if nodes else '')
 " <<< "$response" 2>/dev/null)
 
-    [[ "$state_name" == "Plan Approved" || "$state_name" == "Change Required" ]]
+    [[ "$state_name" == "Plan Approved" || "$state_name" == "Changes Required" ]]
 }
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────
@@ -595,7 +595,7 @@ process_ticket() {
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local _cur_state
         _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""
-        if [[ "$_cur_state" == "Plan Approved" || "$_cur_state" == "Change Required" ]]; then
+        if [[ "$_cur_state" == "Plan Approved" || "$_cur_state" == "Changes Required" ]]; then
             REVERT_STATE="$_cur_state"
         fi
     fi
@@ -626,7 +626,7 @@ process_ticket() {
     PIPELINE_PID=$!
 
     start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID"
-    start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" "Plan Approved:Change Required:In Progress"
+    start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" "Plan Approved:Changes Required:In Progress"
 
     wait "$PIPELINE_PID"
     exit_code=$?
@@ -661,7 +661,7 @@ process_ticket() {
 
     # ── Conditional cache: only skip on future polls if Linear status moved on ─
     if ticket_still_actionable "$ticket_id"; then
-        log WARN "  $ticket_id still in Plan Approved/Change Required — will retry next poll (not cached)"
+        log WARN "  $ticket_id still in Plan Approved/Changes Required — will retry next poll (not cached)"
     else
         mark_processed "$ticket_id"
         log INFO "  $ticket_id status advanced — cached to skip future polls"

@@ -106,7 +106,7 @@ services:
     working_dir: /workspace/repo
     mem_limit: ${AGENT_MEM_LIMIT:-8g}
     memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
-    command: ["./scripts/autonomous-agent-process-pi.sh", "--once"]
+    command: ["./scripts/autonomous-agent-process-pi.sh"]
     profiles: ["process-pi", "all-pi"]
     env_file:
       - path: .env
