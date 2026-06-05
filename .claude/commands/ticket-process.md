@@ -104,12 +104,20 @@ Update `handoff.md`: set `last_completed_phase: 4`.
 
 ## Phase 5 — Automated Tests
 
+**Tests are not complete until screenshots or a screen recording of the test run are captured and will be attached to the Linear ticket. Text output alone is never sufficient evidence.**
+
 Run from worktree:
 ```bash
 cd "${WORKTREE}" && cargo test -j 2 --all -- --test-threads=2 2>&1
 cd "${WORKTREE}/keeper" && npm test 2>&1
 cd "${WORKTREE}/frontend-issuance" && pnpm lint && pnpm build 2>&1 | tail -30
 ```
+
+**Evidence requirement (mandatory — feeds directly into Phase 6):**
+
+- **UI/frontend changes**: start a screen recording before any browser interaction (`agent-browser record start "${PROOF_DIR}/test-run.webm"`), take a screenshot per acceptance criterion as it is exercised, stop recording after completion. Save to `${PROOF_DIR}/`.
+- **API/backend changes**: save every `curl` response to `${PROOF_DIR}/` during test execution — not retroactively.
+- Evidence files must exist in `${PROOF_DIR}/` before updating `handoff.md`. Missing evidence = Phase 5 is not complete.
 
 Fix failures (up to 2 attempts). Update `handoff.md`: set `last_completed_phase: 5`.
 

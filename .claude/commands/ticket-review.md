@@ -91,6 +91,8 @@ Launch `Explore` agent (quick) scoped to changed files. Check: acceptance criter
 
 ## Phase 4 — Tests
 
+**Tests are not complete until visual evidence is captured and attached to the Linear ticket. Text output alone is never sufficient.**
+
 Run from worktree:
 ```bash
 cd "${WORKTREE}" && cargo test -j 2 --all -- --test-threads=2 2>&1
@@ -101,6 +103,12 @@ cd "${WORKTREE}/frontend-issuance" && pnpm lint && pnpm build 2>&1 | tail -40
 **Missing test coverage** → write tests (TDD: fails on develop, passes on branch), commit + push to branch.
 
 Capture full output for the review comment.
+
+**Evidence requirement (mandatory — same bar as Phase 5):**
+
+- **UI/frontend changes**: start a screen recording before running any browser-driven test (`agent-browser record start "${PROOF_DIR}/test-run.webm"`), take at minimum one screenshot per acceptance criterion as it is exercised, stop recording after all tests complete. Recording and screenshots must be uploaded to Linear GCS (see Phase 5 upload steps) and asset URLs recorded before moving on.
+- **API/backend changes**: save all `curl` responses to `${PROOF_DIR}/` during test execution — not just from a manual follow-up.
+- **No exceptions**: a Phase 4 that produces only terminal text is incomplete. Missing evidence = FAIL.
 
 ---
 
