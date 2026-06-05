@@ -584,8 +584,8 @@ nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
 # priority sort: 0 (no priority) sinks to rank 5; 1=urgent … 4=low come first
 # secondary: createdAt ascending (oldest first)
 def prio_rank(n):
-    p = n.get('priority', 0)
-    return (5 if p == 0 else p, n.get('createdAt', ''))
+    p = n.get('priority') or 0  # missing OR null → 0 (no priority)
+    return (5 if p == 0 else p, n.get('createdAt') or '')
 nodes.sort(key=prio_rank)
 ids = [n['identifier'] for n in nodes]
 print('\n'.join(ids) if ids else 'NONE')
@@ -680,9 +680,11 @@ nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
 print(nodes[0]['state']['name'] if nodes else '')
 " <<< "$response" 2>/dev/null)
 
-    # Parse bare state names from POLL_STATES_GQL (strip \\\" escapes and commas)
+    # Parse bare state names from POLL_STATES_GQL (strip \" escapes and commas).
+    # POLL_STATES_GQL holds backslash-escaped quotes (\"Plan Approved\",...), so the
+    # sed pattern \\" matches one literal backslash + quote — strip both per name.
     local poll_states_bare
-    poll_states_bare=$(echo "$POLL_STATES_GQL" | tr ',' '\n' | sed 's/\\\\\\\"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
+    poll_states_bare=$(echo "$POLL_STATES_GQL" | tr ',' '\n' | sed 's/\\"//g; s/^[[:space:]]*//; s/[[:space:]]*$//')
 
     local s
     while IFS= read -r s; do

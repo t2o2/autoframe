@@ -92,9 +92,18 @@ fi
 if [[ ! -f "$WORKSPACE/scripts/autonomous-agent-process.sh" ]]; then
     echo "[entrypoint] Installing autoframe scripts into workspace"
     mkdir -p "$WORKSPACE/scripts"
-    cp /opt/autoframe/scripts/*.sh "$WORKSPACE/scripts/"
-    chmod +x "$WORKSPACE/scripts/"*.sh
+    # Copy the whole scripts tree — lib/ and stages/ included. The refactored
+    # stage scripts source scripts/lib/agent-core.sh and scripts/stages/<stage>.env,
+    # so a top-level *.sh glob alone leaves those undefined and the stage exits 127.
+    cp -R /opt/autoframe/scripts/. "$WORKSPACE/scripts/"
+    find "$WORKSPACE/scripts" -name '*.sh' -exec chmod +x {} +
 fi
+
+# Seed the bundled workflow.toml contract if the project doesn't ship its own.
+# The loader discovers /workspace/repo/workflow.toml (discovery path #2); seeding
+# it here makes Phase 1's override reachable in the container without clobbering a
+# project-supplied file. Best-effort — never block startup if the bundle is absent.
+[[ -f "$WORKSPACE/workflow.toml" ]] || cp /opt/autoframe/workflow.toml "$WORKSPACE/workflow.toml" 2>/dev/null || true
 
 # Install autoframe Claude commands into project if not present
 # (global ~/.claude/commands also works, but project-level takes precedence)

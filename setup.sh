@@ -83,6 +83,20 @@ SCRIPTS=(
     "scripts/autonomous-agent-review.sh"
     "scripts/autonomous-agent-approve.sh"
     "scripts/ask-human.sh"
+    # Shared library + per-stage config the refactored scripts source at runtime.
+    # NOTE: this list is hand-maintained — every new file under scripts/lib or
+    # scripts/stages (and any rename) must be added here or the install silently
+    # ships a stage script whose `source` line points at a missing file.
+    "scripts/lib/agent-core.sh"
+    "scripts/lib/workflow-loader.sh"
+    "scripts/stages/research.env"
+    "scripts/stages/plan.env"
+    "scripts/stages/process.env"
+    "scripts/stages/review.env"
+    "scripts/stages/approve.env"
+    # Bundled workflow contract (Phase 1). Lands at the repo root, where the
+    # loader's discovery path #2 (/workspace/repo/workflow.toml) finds it.
+    "workflow.toml"
 )
 
 COMMANDS=(
@@ -117,8 +131,9 @@ if [[ -n "$TARGET_REPO" ]]; then
         mkdir -p "$TARGET_REPO/.claude/commands"
 
         for file in "${SCRIPTS[@]}"; do
+            mkdir -p "$(dirname "$TARGET_REPO/$file")"
             curl -fsSL "$REPO_RAW/$file" -o "$TARGET_REPO/$file"
-            chmod +x "$TARGET_REPO/$file"
+            [[ "$file" == *.sh ]] && chmod +x "$TARGET_REPO/$file"
         done
 
         for file in "${COMMANDS[@]}"; do

@@ -133,11 +133,14 @@ stale_threshold  = get_int_str('stale_threshold_s')
 linear_stale     = get_int_str('linear_stale_threshold_s')
 
 # ── Build GQL and display variants from poll_states ───────────────────────────
-# GQL:     "Plan Approved","Changes Required"   (bare double-quoted names)
+# GQL:     \"Plan Approved\",\"Changes Required\"   (backslash-escaped quotes)
+#   The consumer (agent-core.sh:570) splices this RAW into a JSON string
+#   ("query":"...{name:{in:[<HERE>]}}..."), so the inner quotes MUST be \"-escaped
+#   or the payload is invalid JSON. This matches the .env POLL_STATES_GQL value.
 # Display: 'Plan Approved' and 'Changes Required'
 
 if poll_states:
-    poll_states_gql     = ','.join(f'"{s}"' for s in poll_states)
+    poll_states_gql     = ','.join(f'\\"{s}\\"' for s in poll_states)
     display_parts       = [f"'{s}'" for s in poll_states]
     poll_states_display = ' and '.join(display_parts)
 else:
