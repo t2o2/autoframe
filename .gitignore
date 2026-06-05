@@ -13,3 +13,8 @@ scripts/autonomous-approve-logs/
 
 # Thought store — ticket artifacts are ephemeral (local-only)
 thoughts/tickets/
+
+node_modules/
+
+# Claude Code / Paseo internal build artifact — not autoframe code
+agent.js
