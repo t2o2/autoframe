@@ -45,6 +45,39 @@ x-agent-base: &agent-base
     - "host.docker.internal:host-gateway"
     - "cdn.growthbook.io:127.0.0.1"
 
+x-pi-base: &pi-base
+  build:
+    context: .
+    dockerfile: Dockerfile.pi
+    args:
+      TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
+  platform: linux/${DOCKER_PLATFORM:-arm64}
+  working_dir: /workspace/repo
+  mem_limit: ${AGENT_MEM_LIMIT:-8g}
+  memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
+  env_file:
+    - path: .env
+      required: true
+    - path: .env.project
+      required: false
+  volumes:
+    - ${HOME}/.pi/agent/auth.json:/opt/host-pi-auth.json:ro
+    - ${HOME}/.pi/agent:/opt/host-pi:ro
+    - cargo_target:/cache/cargo_target
+  environment:
+    - GIT_REPO_URL
+    - GIT_BASE_BRANCH
+    - GITHUB_TOKEN
+    - LINEAR_API_KEY
+    - LINEAR_TEAM_KEY
+    - AGENT_TIER=normal
+    - HOME=/home/agent
+    - CARGO_TARGET_DIR=/cache/cargo_target
+    - RUST_LOG=${RUST_LOG:-info}
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+    - "cdn.growthbook.io:127.0.0.1"
 
 services:
   # ── Claude agents ─────────────────────────────────────────────────────────────
@@ -83,6 +116,41 @@ services:
     profiles: ["plan", "all"]
     environment:
       - AGENT_TIER=normal
+
+  # ── Pi agents ─────────────────────────────────────────────────────────────────
+  # Run all:  docker compose --profile all-pi up --build
+  # Run one:  docker compose --profile process-pi up --build
+
+  process-pi:
+    <<: *pi-base
+    container_name: agent-process-pi
+    command: ["./scripts/autonomous-agent-process-pi.sh"]
+    profiles: ["process-pi", "all-pi"]
+    restart: "no"
+
+  research-pi:
+    <<: *pi-base
+    container_name: agent-research-pi
+    command: ["./scripts/autonomous-agent-research-pi.sh"]
+    profiles: ["research-pi", "all-pi"]
+
+  plan-pi:
+    <<: *pi-base
+    container_name: agent-plan-pi
+    command: ["./scripts/autonomous-agent-plan-pi.sh"]
+    profiles: ["plan-pi", "all-pi"]
+
+  review-pi:
+    <<: *pi-base
+    container_name: agent-review-pi
+    command: ["./scripts/autonomous-agent-review-pi.sh"]
+    profiles: ["review-pi", "all-pi"]
+
+  approve-pi:
+    <<: *pi-base
+    container_name: agent-approve-pi
+    command: ["./scripts/autonomous-agent-approve-pi.sh"]
+    profiles: ["approve-pi", "all-pi"]
 
   # ── Shared infrastructure ─────────────────────────────────────────────────────
   # No profile — starts whenever any agent profile is active (via depends_on).
