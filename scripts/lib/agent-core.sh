@@ -52,7 +52,10 @@
 : "${POLL_STATES_DISPLAY:=tickets}"
 : "${POLL_STATES_GQL:=}"
 : "${CLAIM_STATE:=}"
+: "${DONE_STATE:=}"
 : "${REVERT_STATE:=}"
+: "${PASS_STATE:=}"
+: "${FAIL_STATE:=}"
 : "${WATCH_STATES:=}"
 : "${SLASH_COMMAND:=}"
 : "${LOCK_PREFIX:=agent}"
@@ -62,6 +65,38 @@
 : "${TOOL_EMOJI:=🔧}"
 : "${DIVIDER_COLOR_VAR:=BLUE}"
 : "${STALE_THRESHOLD:=1800}"
+
+# ── Load workflow contract from workflow.toml (if available) ─────────────────
+# Locates workflow.toml by: $WORKFLOW_TOML → /workspace/repo/workflow.toml →
+# bundled default at /opt/autoframe/workflow.toml (container) or repo root (dev).
+# On success, exports WF_* variables for the current stage (keyed by LOCK_PREFIX).
+# On failure, logs a warning and leaves the .env values in place (safe fallback).
+_wf_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${_wf_lib_dir}/workflow-loader.sh" ]]; then
+    # shellcheck source=scripts/lib/workflow-loader.sh
+    source "${_wf_lib_dir}/workflow-loader.sh"
+fi
+unset _wf_lib_dir
+
+# Apply WF_* overrides: WF_* wins if non-empty, otherwise keep the .env value.
+POLL_STATES_GQL="${WF_POLL_STATES_GQL:-$POLL_STATES_GQL}"
+POLL_STATES_DISPLAY="${WF_POLL_STATES_DISPLAY:-$POLL_STATES_DISPLAY}"
+CLAIM_STATE="${WF_CLAIM_STATE:-$CLAIM_STATE}"
+DONE_STATE="${WF_DONE_STATE:-${DONE_STATE:-}}"
+REVERT_STATE="${WF_REVERT_STATE:-$REVERT_STATE}"
+PASS_STATE="${WF_PASS_STATE:-${PASS_STATE:-}}"
+FAIL_STATE="${WF_FAIL_STATE:-${FAIL_STATE:-}}"
+SLASH_COMMAND="${WF_SLASH_COMMAND:-$SLASH_COMMAND}"
+LOCK_PREFIX="${WF_LOCK_PREFIX:-$LOCK_PREFIX}"
+STAGE_VERB="${WF_STAGE_VERB:-$STAGE_VERB}"
+WATCH_STATES="${WF_WATCH_STATES:-$WATCH_STATES}"
+STALE_THRESHOLD="${WF_STALE_THRESHOLD:-$STALE_THRESHOLD}"
+# LINEAR_STALE_THRESHOLD: only override if WF value is non-empty (approve intentionally unset)
+if [[ -n "${WF_LINEAR_STALE_THRESHOLD:-}" ]]; then
+    LINEAR_STALE_THRESHOLD="$WF_LINEAR_STALE_THRESHOLD"
+fi
+# WF_AGENT_PREAMBLE is exported for stage scripts to inject before slash commands
+: "${WF_AGENT_PREAMBLE:=}"
 
 # ── Runtime globals ───────────────────────────────────────────────────────────
 

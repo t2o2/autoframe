@@ -1,0 +1,92 @@
+[tracker]
+type = "linear"
+team = "${LINEAR_TEAM_KEY}"
+
+[defaults]
+agent = "${AGENT:-claude}"
+timeout_silent_s = 1800
+timeout_tracker_s = 3600
+workspace_root = "/workspace/worktrees"
+
+[dispatch]
+order = ["priority", "age"]
+concurrency = 2
+
+[[stages]]
+name          = "research"
+poll          = ["Todo"]
+claim         = "Research"
+done          = "Research Pending Approval"
+revert        = "Todo"
+command       = "/ticket-research"
+pass_state    = ""
+fail_state    = ""
+lock_prefix   = "research"
+stage_verb    = "researching"
+watch_states  = ["Todo", "Research"]
+stale_threshold_s        = 1800
+linear_stale_threshold_s = 3600
+
+[[stages]]
+name          = "plan"
+poll          = ["Research Approved"]
+claim         = "Planning"
+done          = "Plan Pending Approval"
+revert        = "Research Approved"
+command       = "/ticket-plan"
+pass_state    = ""
+fail_state    = ""
+lock_prefix   = "plan"
+stage_verb    = "planning"
+watch_states  = ["Research Approved", "Planning"]
+stale_threshold_s        = 1800
+linear_stale_threshold_s = 3600
+
+[[stages]]
+name          = "process"
+poll          = ["Plan Approved", "Changes Required"]
+claim         = "In Progress"
+done          = "Review Pending"
+revert        = "Plan Approved"
+command       = "/ticket-process"
+pass_state    = ""
+fail_state    = ""
+lock_prefix   = "process"
+stage_verb    = "processing"
+watch_states  = ["Plan Approved", "Changes Required", "In Progress"]
+stale_threshold_s        = 1800
+linear_stale_threshold_s = 3600
+
+[[stages]]
+name          = "review"
+poll          = ["Review Pending"]
+claim         = "In Review"
+done          = ""
+revert        = "Review Pending"
+command       = "/ticket-review"
+pass_state    = "Human Review"
+fail_state    = "Changes Required"
+lock_prefix   = "review"
+stage_verb    = "reviewing"
+watch_states  = ["Review Pending", "In Review"]
+stale_threshold_s        = 1800
+linear_stale_threshold_s = 3600
+
+[[stages]]
+name          = "approve"
+poll          = ["Merging"]
+claim         = "Merging"
+done          = "Done"
+revert        = "Human Review"
+command       = "/ticket-approve"
+pass_state    = ""
+fail_state    = ""
+lock_prefix   = "approve"
+stage_verb    = "approving"
+watch_states  = ["Merging"]
+stale_threshold_s        = 1800
+linear_stale_threshold_s = ""
+
+[preamble]
+text = """
+"""

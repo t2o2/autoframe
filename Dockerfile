@@ -57,6 +57,7 @@ RUN case "${TARGETARCH}" in \
 COPY scripts /opt/autoframe/scripts
 RUN chmod +x /opt/autoframe/scripts/*.sh
 COPY .claude/commands /opt/autoframe/commands
+COPY workflow.toml /opt/autoframe/workflow.toml
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
