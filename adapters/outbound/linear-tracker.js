@@ -128,15 +128,27 @@ export function createLinearTracker({ apiKey, teamKey }) {
     return nodes[0].id;
   }
 
-  async function resolveStateId(targetState) {
+  /** @type {Map<string,string>|null} */
+  let _stateCache = null;
+
+  async function getStateMap() {
+    if (_stateCache) return _stateCache;
     const data = await gql(buildGetStatesQuery(teamKey));
     const teams = data?.data?.teams?.nodes ?? [];
+    _stateCache = new Map();
     for (const team of teams) {
       for (const state of team.states?.nodes ?? []) {
-        if (state.name === targetState) return state.id;
+        _stateCache.set(state.name, state.id);
       }
     }
-    throw new Error(`State not found: ${targetState}`);
+    return _stateCache;
+  }
+
+  async function resolveStateId(targetState) {
+    const map = await getStateMap();
+    const id = map.get(targetState);
+    if (!id) throw new Error(`State not found: ${targetState}`);
+    return id;
   }
 
   return {
