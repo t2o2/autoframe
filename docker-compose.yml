@@ -11,8 +11,6 @@ x-agent-base: &agent-base
   working_dir: /workspace/repo
   depends_on:
     - redis
-  # Prevent OOM kills — Claude Code is memory-hungry on large repos.
-  # Exit code 137 = SIGKILL from OOM killer. Bump if you still see it.
   mem_limit: ${AGENT_MEM_LIMIT:-8g}
   memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
   env_file:
@@ -21,31 +19,23 @@ x-agent-base: &agent-base
     - path: .env.project
       required: false
   volumes:
-    # Claude auth and commands — read-only from host
     - ${HOME}/.claude.json:/opt/host-claude.json:ro
     - ${HOME}/.claude:/opt/host-claude:ro
-    # Agent skills (Linear API scripts, etc.) — read-only from host
     - ${HOME}/.agents:/opt/host-agents:ro
-    # SSH key for git (optional — use if GIT_REPO_URL is an ssh:// URL)
     # - ${HOME}/.ssh:/home/agent/.ssh:ro
-    # Persistent Rust build cache — survives container restarts
     - cargo_target:/cache/cargo_target
   environment:
-    # ── Git ──────────────────────────────────────────────────────────────────
-    - GIT_REPO_URL           # e.g. https://github.com/org/repo.git
-    - GIT_BASE_BRANCH        # branch to clone from (default: develop)
-    - GITHUB_TOKEN           # HTTPS auth; leave unset if using SSH mount
-    # ── Linear ───────────────────────────────────────────────────────────────
+    - GIT_REPO_URL
+    - GIT_BASE_BRANCH
+    - GITHUB_TOKEN
     - LINEAR_API_KEY
     - LINEAR_TEAM_KEY
-    # ── Anthropic / OpenRouter ────────────────────────────────────────────────
-    - ANTHROPIC_API_KEY      # direct Anthropic key
-    - ANTHROPIC_BASE_URL     # override API endpoint (e.g. OpenRouter)
-    - CLAUDE_CODE_OAUTH_TOKEN  # long-lived token from: claude setup-token
-    - OPENROUTER_API_KEY       # fallback: OpenRouter key
-    - OR_MODEL_NORMAL          # OpenRouter model for standard agents
-    - OR_MODEL_ADVANCED        # OpenRouter model for plan/review agents
-    # ── Runtime ──────────────────────────────────────────────────────────────
+    - ANTHROPIC_API_KEY
+    - ANTHROPIC_BASE_URL
+    - CLAUDE_CODE_OAUTH_TOKEN
+    - OPENROUTER_API_KEY
+    - OR_MODEL_NORMAL
+    - OR_MODEL_ADVANCED
     - HOME=/home/agent
     - CARGO_TARGET_DIR=/cache/cargo_target
     - RUST_LOG=${RUST_LOG:-info}
@@ -55,10 +45,45 @@ x-agent-base: &agent-base
     - "host.docker.internal:host-gateway"
     - "cdn.growthbook.io:127.0.0.1"
 
+x-pi-base: &pi-base
+  build:
+    context: .
+    dockerfile: Dockerfile.pi
+    args:
+      TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
+  platform: linux/${DOCKER_PLATFORM:-arm64}
+  working_dir: /workspace/repo
+  mem_limit: ${AGENT_MEM_LIMIT:-8g}
+  memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
+  env_file:
+    - path: .env
+      required: true
+    - path: .env.project
+      required: false
+  volumes:
+    - ${HOME}/.pi/agent/auth.json:/opt/host-pi-auth.json:ro
+    - ${HOME}/.pi/agent:/opt/host-pi:ro
+    - cargo_target:/cache/cargo_target
+  environment:
+    - GIT_REPO_URL
+    - GIT_BASE_BRANCH
+    - GITHUB_TOKEN
+    - LINEAR_API_KEY
+    - LINEAR_TEAM_KEY
+    - AGENT_TIER=normal
+    - HOME=/home/agent
+    - CARGO_TARGET_DIR=/cache/cargo_target
+    - RUST_LOG=${RUST_LOG:-info}
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+    - "cdn.growthbook.io:127.0.0.1"
+
 services:
+  # ── Claude agents ─────────────────────────────────────────────────────────────
+  # Scale with: docker compose up --scale process=3 --profile process
   process:
     <<: *agent-base
-    container_name: agent-process
     command: ["./scripts/autonomous-agent-process.sh"]
     profiles: ["process", "all"]
     environment:
@@ -66,7 +91,6 @@ services:
 
   review:
     <<: *agent-base
-    container_name: agent-review
     command: ["./scripts/autonomous-agent-review.sh"]
     profiles: ["review", "all"]
     environment:
@@ -74,7 +98,6 @@ services:
 
   approve:
     <<: *agent-base
-    container_name: agent-approve
     command: ["./scripts/autonomous-agent-approve.sh"]
     profiles: ["approve", "all"]
     environment:
@@ -82,7 +105,6 @@ services:
 
   research:
     <<: *agent-base
-    container_name: agent-research
     command: ["./scripts/autonomous-agent-research.sh"]
     profiles: ["research", "all"]
     environment:
@@ -90,218 +112,55 @@ services:
 
   plan:
     <<: *agent-base
-    container_name: agent-plan
     command: ["./scripts/autonomous-agent-plan.sh"]
     profiles: ["plan", "all"]
     environment:
       - AGENT_TIER=normal
 
-  # ── Pi services ────────────────────────────────────────────────────────────
+  # ── Pi agents ─────────────────────────────────────────────────────────────────
   # Run all:  docker compose --profile all-pi up --build
   # Run one:  docker compose --profile process-pi up --build
 
   process-pi:
-    build:
-      context: .
-      dockerfile: Dockerfile.pi
-      args:
-        TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
-    platform: linux/${DOCKER_PLATFORM:-arm64}
+    <<: *pi-base
     container_name: agent-process-pi
-    working_dir: /workspace/repo
-    mem_limit: ${AGENT_MEM_LIMIT:-8g}
-    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-process-pi.sh"]
     profiles: ["process-pi", "all-pi"]
-    env_file:
-      - path: .env
-        required: true
-      - path: .env.project
-        required: false
-    volumes:
-      # Pi OAuth auth — read-only; copied into container at startup
-      - ${HOME}/.pi/agent/auth.json:/opt/host-pi-auth.json:ro
-      # Full host pi config (settings, extensions, agents, skills)
-      - ${HOME}/.pi/agent:/opt/host-pi:ro
-      # SSH key for git (optional)
-      # - ${HOME}/.ssh:/home/agent/.ssh:ro
-      # Persistent Rust build cache
-      - cargo_target:/cache/cargo_target
-    environment:
-      - GIT_REPO_URL
-      - GIT_BASE_BRANCH
-      - GITHUB_TOKEN
-      - LINEAR_API_KEY
-      - LINEAR_TEAM_KEY
-      - AGENT_TIER=normal
-      - HOME=/home/agent
-      - CARGO_TARGET_DIR=/cache/cargo_target
-      - RUST_LOG=${RUST_LOG:-info}
     restart: "no"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-      - "cdn.growthbook.io:127.0.0.1"
 
   research-pi:
-    build:
-      context: .
-      dockerfile: Dockerfile.pi
-      args:
-        TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
-    platform: linux/${DOCKER_PLATFORM:-arm64}
+    <<: *pi-base
     container_name: agent-research-pi
-    working_dir: /workspace/repo
-    mem_limit: ${AGENT_MEM_LIMIT:-8g}
-    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-research-pi.sh"]
     profiles: ["research-pi", "all-pi"]
-    env_file:
-      - path: .env
-        required: true
-      - path: .env.project
-        required: false
-    volumes:
-      - ${HOME}/.pi/agent/auth.json:/opt/host-pi-auth.json:ro
-      - ${HOME}/.pi/agent:/opt/host-pi:ro
-      - cargo_target:/cache/cargo_target
-    environment:
-      - GIT_REPO_URL
-      - GIT_BASE_BRANCH
-      - GITHUB_TOKEN
-      - LINEAR_API_KEY
-      - LINEAR_TEAM_KEY
-      - AGENT_TIER=normal
-      - HOME=/home/agent
-      - CARGO_TARGET_DIR=/cache/cargo_target
-      - RUST_LOG=${RUST_LOG:-info}
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-      - "cdn.growthbook.io:127.0.0.1"
 
   plan-pi:
-    build:
-      context: .
-      dockerfile: Dockerfile.pi
-      args:
-        TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
-    platform: linux/${DOCKER_PLATFORM:-arm64}
+    <<: *pi-base
     container_name: agent-plan-pi
-    working_dir: /workspace/repo
-    mem_limit: ${AGENT_MEM_LIMIT:-8g}
-    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-plan-pi.sh"]
     profiles: ["plan-pi", "all-pi"]
-    env_file:
-      - path: .env
-        required: true
-      - path: .env.project
-        required: false
-    volumes:
-      - ${HOME}/.pi/agent/auth.json:/opt/host-pi-auth.json:ro
-      - ${HOME}/.pi/agent:/opt/host-pi:ro
-      - cargo_target:/cache/cargo_target
-    environment:
-      - GIT_REPO_URL
-      - GIT_BASE_BRANCH
-      - GITHUB_TOKEN
-      - LINEAR_API_KEY
-      - LINEAR_TEAM_KEY
-      - AGENT_TIER=normal
-      - HOME=/home/agent
-      - CARGO_TARGET_DIR=/cache/cargo_target
-      - RUST_LOG=${RUST_LOG:-info}
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-      - "cdn.growthbook.io:127.0.0.1"
 
   review-pi:
-    build:
-      context: .
-      dockerfile: Dockerfile.pi
-      args:
-        TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
-    platform: linux/${DOCKER_PLATFORM:-arm64}
+    <<: *pi-base
     container_name: agent-review-pi
-    working_dir: /workspace/repo
-    mem_limit: ${AGENT_MEM_LIMIT:-8g}
-    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-review-pi.sh"]
     profiles: ["review-pi", "all-pi"]
-    env_file:
-      - path: .env
-        required: true
-      - path: .env.project
-        required: false
-    volumes:
-      - ${HOME}/.pi/agent/auth.json:/opt/host-pi-auth.json:ro
-      - ${HOME}/.pi/agent:/opt/host-pi:ro
-      - cargo_target:/cache/cargo_target
-    environment:
-      - GIT_REPO_URL
-      - GIT_BASE_BRANCH
-      - GITHUB_TOKEN
-      - LINEAR_API_KEY
-      - LINEAR_TEAM_KEY
-      - AGENT_TIER=normal
-      - HOME=/home/agent
-      - CARGO_TARGET_DIR=/cache/cargo_target
-      - RUST_LOG=${RUST_LOG:-info}
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-      - "cdn.growthbook.io:127.0.0.1"
 
   approve-pi:
-    build:
-      context: .
-      dockerfile: Dockerfile.pi
-      args:
-        TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
-    platform: linux/${DOCKER_PLATFORM:-arm64}
+    <<: *pi-base
     container_name: agent-approve-pi
-    working_dir: /workspace/repo
-    mem_limit: ${AGENT_MEM_LIMIT:-8g}
-    memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
     command: ["./scripts/autonomous-agent-approve-pi.sh"]
     profiles: ["approve-pi", "all-pi"]
-    env_file:
-      - path: .env
-        required: true
-      - path: .env.project
-        required: false
-    volumes:
-      - ${HOME}/.pi/agent/auth.json:/opt/host-pi-auth.json:ro
-      - ${HOME}/.pi/agent:/opt/host-pi:ro
-      - cargo_target:/cache/cargo_target
-    environment:
-      - GIT_REPO_URL
-      - GIT_BASE_BRANCH
-      - GITHUB_TOKEN
-      - LINEAR_API_KEY
-      - LINEAR_TEAM_KEY
-      - AGENT_TIER=normal
-      - HOME=/home/agent
-      - CARGO_TARGET_DIR=/cache/cargo_target
-      - RUST_LOG=${RUST_LOG:-info}
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-      - "cdn.growthbook.io:127.0.0.1"
 
-  # ── Shared infrastructure ──────────────────────────────────────────────────
-  # Redis: atomic claim coordination across multiple agent containers.
+  # ── Shared infrastructure ─────────────────────────────────────────────────────
   # No profile — starts whenever any agent profile is active (via depends_on).
   # Persistence disabled: claims are ephemeral; a restart clears stale locks
-  # and the stale-revert logic in the scheduler handles any in-flight tickets.
+  # and the stale-revert logic handles any in-flight tickets.
   redis:
     image: redis:7-alpine
     container_name: autoframe-redis
     restart: unless-stopped
     command: redis-server --appendonly no --save ""
-    networks:
-      - default
 
 volumes:
   cargo_target:
