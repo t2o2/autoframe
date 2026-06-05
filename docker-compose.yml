@@ -9,6 +9,8 @@ x-agent-base: &agent-base
       TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
   platform: linux/${DOCKER_PLATFORM:-arm64}
   working_dir: /workspace/repo
+  depends_on:
+    - redis
   # Prevent OOM kills — Claude Code is memory-hungry on large repos.
   # Exit code 137 = SIGKILL from OOM killer. Bump if you still see it.
   mem_limit: ${AGENT_MEM_LIMIT:-8g}
@@ -47,6 +49,7 @@ x-agent-base: &agent-base
     - HOME=/home/agent
     - CARGO_TARGET_DIR=/cache/cargo_target
     - RUST_LOG=${RUST_LOG:-info}
+    - REDIS_URL=redis://redis:6379
   restart: unless-stopped
   extra_hosts:
     - "host.docker.internal:host-gateway"
@@ -286,6 +289,19 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
       - "cdn.growthbook.io:127.0.0.1"
+
+  # ── Shared infrastructure ──────────────────────────────────────────────────
+  # Redis: atomic claim coordination across multiple agent containers.
+  # No profile — starts whenever any agent profile is active (via depends_on).
+  # Persistence disabled: claims are ephemeral; a restart clears stale locks
+  # and the stale-revert logic in the scheduler handles any in-flight tickets.
+  redis:
+    image: redis:7-alpine
+    container_name: autoframe-redis
+    restart: unless-stopped
+    command: redis-server --appendonly no --save ""
+    networks:
+      - default
 
 volumes:
   cargo_target:

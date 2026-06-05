@@ -52,7 +52,7 @@ export function createClaimStore() {
      * @param {string} owner
      * @returns {boolean}
      */
-    acquire(ticketId, owner) {
+    async acquire(ticketId, owner, _stage, _ttl) {
       const entry = _getEntry(ticketId);
 
       if (entry.state === STATE_RUNNING) {
@@ -73,7 +73,7 @@ export function createClaimStore() {
      * @param {string} ticketId
      * @param {string} owner
      */
-    release(ticketId, owner) {
+    async release(ticketId, owner, _stage) {
       const entry = _getEntry(ticketId);
       if (entry.state !== STATE_RUNNING) return;
       if (entry.owner !== owner) return;
@@ -87,7 +87,7 @@ export function createClaimStore() {
      * @param {string} ticketId
      * @param {number} retryAt   ms timestamp (Date.now()-compatible)
      */
-    queueRetry(ticketId, retryAt) {
+    async queueRetry(ticketId, retryAt, _stage) {
       const entry = _getEntry(ticketId);
       if (entry.state !== STATE_RUNNING) return;
       claims.set(ticketId, { state: STATE_RETRY_QUEUED, retryAt });
@@ -97,9 +97,10 @@ export function createClaimStore() {
      * Check whether a ticket is currently claimed (Running or RetryQueued).
      *
      * @param {string} ticketId
-     * @returns {boolean}
+     * @param {string} [_stage]
+     * @returns {Promise<boolean>}
      */
-    isOwned(ticketId) {
+    async isOwned(ticketId, _stage) {
       const entry = _getEntry(ticketId);
       return entry.state !== STATE_UNCLAIMED;
     },
@@ -108,9 +109,10 @@ export function createClaimStore() {
      * Get the current state name for a ticket.
      *
      * @param {string} ticketId
-     * @returns {'Unclaimed'|'Running'|'RetryQueued'}
+     * @param {string} [_stage]
+     * @returns {Promise<'Unclaimed'|'Running'|'RetryQueued'>}
      */
-    getState(ticketId) {
+    async getState(ticketId, _stage) {
       return _getEntry(ticketId).state;
     },
   };

@@ -62,7 +62,7 @@ export function createScheduler({ tracker, agent, claims, store, clock, stages, 
           if (ageMs > thresholdMs) {
             try {
               await tracker.revertTicket(record.ticketId, stage.revert);
-              claims.release(record.ticketId, 'engine');
+              await claims.release(record.ticketId, 'engine', stage.name);
             } catch (err) {
               console.error(
                 `[scheduler] Failed to revert stale ticket ${record.ticketId}: ${err.message}`,
@@ -88,9 +88,9 @@ export function createScheduler({ tracker, agent, claims, store, clock, stages, 
         for (const ticket of sorted) {
           if (_runningCount() >= concurrency) break;
 
-          if (claims.isOwned(ticket.id)) continue;
+          if (await claims.isOwned(ticket.id, stage.name)) continue;
 
-          const acquired = claims.acquire(ticket.id, 'engine');
+          const acquired = await claims.acquire(ticket.id, 'engine', stage.name, stage.stale_threshold_s);
           if (!acquired) continue;
 
           const startedAt = clock.now();
@@ -106,16 +106,16 @@ export function createScheduler({ tracker, agent, claims, store, clock, stages, 
               attempt: attemptNumber,
               onEvent: () => {},
             })
-            .then(() => {
+            .then(async () => {
               // UNVERIFIED: completion does not clear the store attempt record —
               // listRunning() grows unbounded across ticks; needs a StorePort.deleteAttempt()
               // method and a multi-tick integration test before this is production-safe.
-              claims.release(ticket.id, 'engine');
+              await claims.release(ticket.id, 'engine', stage.name);
             })
-            .catch((err) => {
+            .catch(async (err) => {
               console.error(`[scheduler] agent.run failed for ${ticket.id}: ${err.message}`);
               // UNVERIFIED: same unbounded-store issue as the success path above.
-              claims.release(ticket.id, 'engine');
+              await claims.release(ticket.id, 'engine', stage.name);
             });
         }
       }

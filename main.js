@@ -89,15 +89,25 @@ async function runCommand({ stage, dryRun }) {
 
   const { createLinearTracker } = await import('./adapters/outbound/linear-tracker.js');
   const { createClaudeAgent } = await import('./adapters/outbound/claude-agent.js');
-  const { createClaimStore } = await import('./adapters/outbound/claim-store.js');
   const { createFsStore } = await import('./adapters/outbound/fs-store.js');
   const { createScheduler } = await import('./core/scheduler.js');
   const { createPollDriver } = await import('./adapters/inbound/poll-driver.js');
 
   const tracker = createLinearTracker({ apiKey, teamKey });
   const agent = createClaudeAgent();
-  const claims = createClaimStore();
   const store = createFsStore();
+
+  let claims;
+  const redisUrl = process.env.REDIS_URL;
+  if (redisUrl) {
+    const { createRedisClaimStore } = await import('./adapters/outbound/claim-store-redis.js');
+    claims = createRedisClaimStore({ redisUrl });
+    console.log(`[autoframe] Claim store: Redis (${redisUrl})`);
+  } else {
+    const { createClaimStore } = await import('./adapters/outbound/claim-store.js');
+    claims = createClaimStore();
+    console.log('[autoframe] Claim store: in-memory (single-agent mode)');
+  }
   const clock = { now: () => Date.now() };
   const POLL_INTERVAL_MS = 60_000;
 
@@ -119,16 +129,16 @@ async function runCommand({ stage, dryRun }) {
     pollIntervalMs: POLL_INTERVAL_MS,
   });
 
-  process.on('SIGINT', () => {
-    console.log('\n[autoframe] Shutting down...');
+  async function shutdown(signal) {
+    if (signal === 'SIGINT') console.log('');
+    console.log('[autoframe] Shutting down...');
     driver.stop();
+    if (claims.quit) await claims.quit();
     process.exit(0);
-  });
+  }
 
-  process.on('SIGTERM', () => {
-    driver.stop();
-    process.exit(0);
-  });
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 /**

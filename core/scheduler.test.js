@@ -91,7 +91,7 @@ describe('createScheduler', () => {
         new Map([['process', [{ ticketId: 'ENG-99', startedAt, stage: 'process' }]]]),
       );
 
-      claims.acquire('ENG-99', 'engine');
+      await claims.acquire('ENG-99', 'engine');
 
       const clock = { now: () => now };
 
@@ -108,7 +108,7 @@ describe('createScheduler', () => {
       await scheduler.tick();
 
       assert.deepEqual(revertedTickets, ['ENG-99']);
-      assert.equal(claims.isOwned('ENG-99'), false);
+      assert.equal(await claims.isOwned('ENG-99'), false);
     });
 
     it('does not revert a running ticket within the stale threshold', async () => {
@@ -135,7 +135,7 @@ describe('createScheduler', () => {
         new Map([['process', [{ ticketId: 'ENG-99', startedAt, stage: 'process' }]]]),
       );
 
-      claims.acquire('ENG-99', 'engine');
+      await claims.acquire('ENG-99', 'engine');
 
       const scheduler = createScheduler({
         tracker,
@@ -150,7 +150,7 @@ describe('createScheduler', () => {
       await scheduler.tick();
 
       assert.deepEqual(revertedTickets, []);
-      assert.equal(claims.isOwned('ENG-99'), true);
+      assert.equal(await claims.isOwned('ENG-99'), true);
     });
   });
 
@@ -199,7 +199,7 @@ describe('createScheduler', () => {
     it('skips an already-claimed ticket', async () => {
       const ticket = makeTicket();
 
-      claims.acquire(ticket.id, 'engine');
+      await claims.acquire(ticket.id, 'engine');
 
       const tracker = {
         async fetchCandidates() {
