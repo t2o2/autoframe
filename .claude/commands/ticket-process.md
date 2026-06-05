@@ -76,7 +76,7 @@ Parse from Phase 0: title, description, priority, labels, status, team ID. Confi
 
 **Dependency check:** If ticket has a parent, fetch siblings. If a prerequisite sibling is in Todo/Backlog, process it first automatically.
 
-If description too vague (< 2 actionable sentences): post comment asking for clarification, use `AskUserQuestion`.
+If description too vague (< 2 actionable sentences): ask via `./scripts/ask-human.sh {{ARGUMENTS}} "<question>" "<opt1>" "<opt2>"` (it @-mentions the ticket owner on Linear and waits for a reply). Use `AskUserQuestion` only in an attended/interactive session.
 
 ---
 
@@ -86,7 +86,7 @@ All reads from `$WORKTREE`.
 
 - **Bug tickets**: Launch `bug-investigator` — capture root cause, affected files, repro path
 - **Feature tickets**: Launch `Explore` + `Plan` agents — map relevant code, design implementation
-- **Ambiguous**: `AskUserQuestion` → bug or feature?
+- **Ambiguous**: `./scripts/ask-human.sh {{ARGUMENTS}} "Bug or feature?" "Bug" "Feature"` (@-mentions the owner; `AskUserQuestion` only when attended)
 
 Post key decisions as comments.
 
@@ -96,7 +96,7 @@ Post key decisions as comments.
 
 Launch `senior-implementer` with: ticket description, plan from Phase 3, worktree path. Follow TDD (red → green → refactor). All changes in `$WORKTREE`.
 
-On blockers: post comment + `AskUserQuestion`.
+On blockers: `./scripts/ask-human.sh {{ARGUMENTS}} "<blocker question>" [options...]` to @-mention the owner and wait (`AskUserQuestion` only when attended).
 
 Update `handoff.md`: set `last_completed_phase: 4`.
 

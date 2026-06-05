@@ -28,7 +28,7 @@ bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <researc
 bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Picking up research for {{ARGUMENTS}}."
 ```
 
-If too vague (< 2 actionable sentences): `./scripts/ask-human.sh` or `AskUserQuestion`.
+If too vague (< 2 actionable sentences): `./scripts/ask-human.sh {{ARGUMENTS}} "<question>" [options...]` — it @-mentions the ticket owner on Linear and waits. Use `AskUserQuestion` only in an attended/interactive session.
 
 ---
 
