@@ -113,7 +113,7 @@ git -C "${MAIN_REPO}" push origin --delete "${BRANCH}" 2>/dev/null || true
 ## Status Transitions
 
 ```
-Human Review / In Review  →  Done  (after merge + push)
+Merging  →  Done  (after merge + push)
 ```
 
 ## Critical Rules

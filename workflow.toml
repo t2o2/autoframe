@@ -73,11 +73,26 @@ stale_threshold_s        = 1800
 linear_stale_threshold_s = 3600
 
 [[stages]]
+name          = "retro"
+poll          = ["Retrospective"]
+claim         = "Retrospective"
+done          = "Merging"
+revert        = "Retrospective"
+command       = "/ticket-retro"
+pass_state    = ""
+fail_state    = ""
+lock_prefix   = "retro"
+stage_verb    = "retrospecting"
+watch_states  = ["Retrospective"]
+stale_threshold_s        = 1800
+linear_stale_threshold_s = ""
+
+[[stages]]
 name          = "approve"
 poll          = ["Merging"]
 claim         = "Merging"
 done          = "Done"
-revert        = "Human Review"
+revert        = "Retrospective"
 command       = "/ticket-approve"
 pass_state    = ""
 fail_state    = ""

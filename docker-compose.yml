@@ -117,6 +117,13 @@ services:
     environment:
       - AGENT_TIER=normal
 
+  retro:
+    <<: *agent-base
+    command: ["./scripts/autonomous-agent-retro.sh"]
+    profiles: ["retro", "all"]
+    environment:
+      - AGENT_TIER=normal
+
   # ── Pi agents ─────────────────────────────────────────────────────────────────
   # Run all:  docker compose --profile all-pi up --build
   # Run one:  docker compose --profile process-pi up --build
@@ -151,6 +158,12 @@ services:
     container_name: agent-approve-pi
     command: ["./scripts/autonomous-agent-approve-pi.sh"]
     profiles: ["approve-pi", "all-pi"]
+
+  retro-pi:
+    <<: *pi-base
+    container_name: agent-retro-pi
+    command: ["./scripts/autonomous-agent-retro-pi.sh"]
+    profiles: ["retro-pi", "all-pi"]
 
   # ── Shared infrastructure ─────────────────────────────────────────────────────
   # No profile — starts whenever any agent profile is active (via depends_on).

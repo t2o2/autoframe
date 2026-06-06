@@ -190,7 +190,7 @@ bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <changes
 ## Phase 8 — Hand Off
 
 - **FAIL**: inform user, leave worktree untouched for implementer
-- **PASS**: `AskUserQuestion` — "Review PASSED. System still running at :8105/:8101/:8104. Full report on Linear."
+- **PASS**: `AskUserQuestion` — "Review PASSED. System still running at :8105/:8101/:8104. Full report on Linear. Move the ticket from **Human Review → Retrospective** to trigger the automated retrospective + merge."
 
 Worktree is NOT removed — owned by `/ticket-approve`.
 
