@@ -33,6 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon0 \
     libxrandr2 \
     xdg-utils \
+    ffmpeg \
+    clang \
+    mold \
     && rm -rf /var/lib/apt/lists/*
 
 # pnpm
@@ -51,6 +54,19 @@ RUN case "${TARGETARCH}" in \
       -o /tmp/wtp.deb && \
     dpkg -i /tmp/wtp.deb && \
     rm /tmp/wtp.deb
+
+# sccache — compiler cache for Rust builds
+RUN case "${TARGETARCH}" in \
+      arm64) SCCACHE_ARCH="aarch64-unknown-linux-musl" ;; \
+      amd64) SCCACHE_ARCH="x86_64-unknown-linux-musl" ;; \
+      *) echo "Unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v0.8.2/sccache-v0.8.2-${SCCACHE_ARCH}.tar.gz" \
+      -o /tmp/sccache.tar.gz && \
+    tar xzf /tmp/sccache.tar.gz -C /tmp && \
+    mv "/tmp/sccache-v0.8.2-${SCCACHE_ARCH}/sccache" /usr/local/bin/sccache && \
+    chmod +x /usr/local/bin/sccache && \
+    rm -rf /tmp/sccache.tar.gz "/tmp/sccache-v0.8.2-${SCCACHE_ARCH}"
 
 # Bake autoframe agent scripts + Claude commands into the image.
 # The entrypoint copies these into the cloned repo if setup.sh hasn't been run.
@@ -93,6 +109,14 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
            /home/agent/.rustup/toolchains/*/share/man \
            /home/agent/.rustup/tmp \
            /home/agent/.rustup/downloads
+
+# Use mold for faster Rust linking; sccache wraps rustc to cache compilation artifacts
+RUN printf '[build]\nrustflags = ["-C", "linker=clang", "-C", "link-arg=-fuse-ld=mold"]\n' \
+    > /home/agent/.cargo/config.toml
+
+ENV RUSTC_WRAPPER=sccache \
+    SCCACHE_DIR=/cache/sccache \
+    CARGO_INCREMENTAL=0
 
 ENV PATH="/home/agent/.cargo/bin:$PATH"
 

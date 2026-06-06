@@ -24,6 +24,7 @@ x-agent-base: &agent-base
     - ${HOME}/.agents:/opt/host-agents:ro
     # - ${HOME}/.ssh:/home/agent/.ssh:ro
     - cargo_target:/cache/cargo_target
+    - sccache:/cache/sccache
   environment:
     - GIT_REPO_URL
     - GIT_BASE_BRANCH
@@ -64,6 +65,7 @@ x-pi-base: &pi-base
     - ${HOME}/.pi/agent/auth.json:/opt/host-pi-auth.json:ro
     - ${HOME}/.pi/agent:/opt/host-pi:ro
     - cargo_target:/cache/cargo_target
+    - sccache:/cache/sccache
   environment:
     - GIT_REPO_URL
     - GIT_BASE_BRANCH
@@ -178,3 +180,5 @@ services:
 volumes:
   cargo_target:
     name: autoframe_cargo_target
+  sccache:
+    name: autoframe_sccache
