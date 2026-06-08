@@ -87,7 +87,7 @@ export function createAttempt(ticketId, stage, attemptNumber) {
     },
 
     /**
-     * Serialize to a plain object for StorePort persistence.
+     * Serialize to a plain object for persistence.
      *
      * @returns {object}
      */

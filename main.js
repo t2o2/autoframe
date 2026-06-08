@@ -6,8 +6,14 @@
  * Uses process.argv for argument parsing (no external arg-parser needed).
  */
 
+import os from 'node:os';
 import { parseArgs, printHelp } from './adapters/inbound/cli.js';
 import { loadWorkflow } from './adapters/outbound/workflow-loader.js';
+
+// Per-container identity: tags this container's claims so the concurrency cap is
+// counted per-container (each container dispatches up to config.dispatch.concurrency).
+// hostname is the container id in most orchestrators; pid disambiguates locally.
+const OWNER = `${os.hostname()}:${process.pid}`;
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -89,25 +95,16 @@ async function runCommand({ stage, dryRun }) {
 
   const { createLinearTracker } = await import('./adapters/outbound/linear-tracker.js');
   const { createClaudeAgent } = await import('./adapters/outbound/claude-agent.js');
-  const { createFsStore } = await import('./adapters/outbound/fs-store.js');
   const { createScheduler } = await import('./core/scheduler.js');
   const { createPollDriver } = await import('./adapters/inbound/poll-driver.js');
 
   const tracker = createLinearTracker({ apiKey, teamKey });
   const agent = createClaudeAgent();
-  const store = createFsStore();
 
-  let claims;
-  const redisUrl = process.env.REDIS_URL;
-  if (redisUrl) {
-    const { createRedisClaimStore } = await import('./adapters/outbound/claim-store-redis.js');
-    claims = createRedisClaimStore({ redisUrl });
-    console.log(`[autoframe] Claim store: Redis (${redisUrl})`);
-  } else {
-    const { createClaimStore } = await import('./adapters/outbound/claim-store.js');
-    claims = createClaimStore();
-    console.log('[autoframe] Claim store: in-memory (single-agent mode)');
-  }
+  const { claims, label } = await createClaims();
+  console.log(`[autoframe] Claim store: ${label}`);
+  console.log(`[autoframe] Container owner: ${OWNER}`);
+
   const clock = { now: () => Date.now() };
   const POLL_INTERVAL_MS = 60_000;
 
@@ -115,10 +112,10 @@ async function runCommand({ stage, dryRun }) {
     tracker,
     agent,
     claims,
-    store,
     clock,
     stages: targetStages,
     config,
+    owner: OWNER,
   });
 
   console.log(`[autoframe] Starting engine for stage(s): ${targetStages.map((s) => s.name).join(', ')}`);
@@ -142,10 +139,25 @@ async function runCommand({ stage, dryRun }) {
 }
 
 /**
- * Handle `node main.js status`
+ * Construct the claim store: Redis when REDIS_URL is set (shared across
+ * containers), otherwise an in-memory store for single-process mode.
+ *
+ * @returns {Promise<{ claims: import('./core/ports.js').ClaimPort & { quit?: () => Promise<void> }, label: string, shared: boolean }>}
+ */
+async function createClaims() {
+  const redisUrl = process.env.REDIS_URL;
+  if (redisUrl) {
+    const { createRedisClaimStore } = await import('./adapters/outbound/claim-store-redis.js');
+    return { claims: createRedisClaimStore({ redisUrl }), label: `Redis (${redisUrl})`, shared: true };
+  }
+  const { createClaimStore } = await import('./adapters/outbound/claim-store.js');
+  return { claims: createClaimStore(), label: 'in-memory (single-agent mode)', shared: false };
+}
+
+/**
+ * Handle `node main.js status` — reads running claims from the claim store.
  */
 async function statusCommand() {
-  const { createFsStore } = await import('./adapters/outbound/fs-store.js');
   const { loadWorkflow } = await import('./adapters/outbound/workflow-loader.js');
 
   const config = loadWorkflow(process.env.WORKFLOW_TOML);
@@ -153,20 +165,27 @@ async function statusCommand() {
     'research', 'plan', 'process', 'review', 'approve',
   ];
 
-  const store = createFsStore();
+  const { claims, label, shared } = await createClaims();
   const now = Date.now();
 
   console.log('=== autoframe status ===');
+  console.log(`Claim store: ${label}`);
   console.log('');
+
+  if (!shared) {
+    console.log('  In-memory claims are not visible across processes — set REDIS_URL to inspect a running engine.');
+    console.log('');
+    return;
+  }
 
   let found = 0;
   for (const stageName of stages) {
-    const running = store.listRunning(stageName);
+    const running = await claims.listRunning(stageName);
     for (const record of running) {
       found++;
       const elapsedS = Math.floor((now - (record.startedAt ?? now)) / 1000);
       const elapsed = `${Math.floor(elapsedS / 60)}m${elapsedS % 60}s`;
-      console.log(`  ${record.ticketId ?? '?'}  stage=${stageName}  elapsed=${elapsed}`);
+      console.log(`  ${record.ticketId ?? '?'}  stage=${stageName}  owner=${record.owner ?? '?'}  elapsed=${elapsed}`);
     }
   }
 
@@ -174,4 +193,6 @@ async function statusCommand() {
     console.log('  No running tickets found.');
   }
   console.log('');
+
+  if (claims.quit) await claims.quit();
 }

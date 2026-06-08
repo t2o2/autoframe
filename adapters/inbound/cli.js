@@ -52,11 +52,12 @@ Commands:
            --stage all       Run all stages with global concurrency cap.
            --dry-run         Print what would run; exit without connecting to Linear.
 
-  status   Read heartbeat/attempt records and print a status table.
+  status   Print running claims from the claim store (requires REDIS_URL).
 
 Environment:
   WORKFLOW_TOML    Path to workflow.toml (optional; falls back to discovery)
   LINEAR_API_KEY   Linear personal API key (required for non-dry-run)
   LINEAR_TEAM_KEY  Linear team key e.g. ENG (required for non-dry-run)
+  REDIS_URL        Redis connection for shared claims (optional; in-memory if unset)
 `.trim());
 }
