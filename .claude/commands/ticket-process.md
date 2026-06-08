@@ -84,6 +84,11 @@ If description too vague (< 2 actionable sentences): ask via `./scripts/ask-huma
 
 All reads from `$WORKTREE`.
 
+Read the cross-ticket lessons log and apply relevant prior learnings to the implementation approach:
+```bash
+cat "${WORKTREE}/thoughts/retrospectives/LESSONS.md" 2>/dev/null
+```
+
 - **Bug tickets**: Launch `bug-investigator` — capture root cause, affected files, repro path
 - **Feature tickets**: Launch `Explore` + `Plan` agents — map relevant code, design implementation
 - **Ambiguous**: `./scripts/ask-human.sh {{ARGUMENTS}} "Bug or feature?" "Bug" "Feature"` (@-mentions the owner; `AskUserQuestion` only when attended)

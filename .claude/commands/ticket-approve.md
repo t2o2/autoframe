@@ -66,6 +66,31 @@ git -C "${MAIN_REPO}" merge --no-ff "${BRANCH}" -m "Merge ${BRANCH} into ${TARGE
 ```
 If `--ff-only` fails due to untracked files: check `git -C "${MAIN_REPO}" status --short`, remove conflicting files, retry.
 
+### Auto-resolve LESSONS.md conflicts (append-only union)
+
+The retro stage commits append-only blocks to `thoughts/retrospectives/LESSONS.md`, so two branches can both append and trigger an add/add conflict on **only** that file. Because every block is additive and ticket-tagged, the correct resolution is always "keep both". If the merge conflicts and the **only** conflicted path is `LESSONS.md`, resolve by union and continue — otherwise stop and report (real conflicts are never auto-resolved):
+
+```bash
+LESSONS_PATH="thoughts/retrospectives/LESSONS.md"
+CONFLICTS=$(git -C "${MAIN_REPO}" diff --name-only --diff-filter=U)
+if [ "${CONFLICTS}" = "${LESSONS_PATH}" ]; then
+  TMP=$(mktemp -d)
+  git -C "${MAIN_REPO}" show ":1:${LESSONS_PATH}" > "${TMP}/base"  2>/dev/null || : > "${TMP}/base"
+  git -C "${MAIN_REPO}" show ":2:${LESSONS_PATH}" > "${TMP}/ours"
+  git -C "${MAIN_REPO}" show ":3:${LESSONS_PATH}" > "${TMP}/theirs"
+  git merge-file -p --union "${TMP}/ours" "${TMP}/base" "${TMP}/theirs" \
+    > "${MAIN_REPO}/${LESSONS_PATH}"
+  git -C "${MAIN_REPO}" add "${LESSONS_PATH}"
+  rm -rf "${TMP}"
+  git -C "${MAIN_REPO}" commit --no-edit   # completes the in-progress merge
+elif [ -n "${CONFLICTS}" ]; then
+  echo "Merge conflict in non-LESSONS files — aborting for human review:"
+  echo "${CONFLICTS}"
+  git -C "${MAIN_REPO}" merge --abort
+  exit 1
+fi
+```
+
 ---
 
 ## Phase 3 — Push
@@ -120,9 +145,10 @@ Merging  →  Done  (after merge + push)
 
 1. Use `git -C "${MAIN_REPO}"` for all main-repo operations — never `cd`
 2. `--ff-only` first, fall back to `--no-ff` on diverged histories
-3. Clean working tree on target branch before merging
-4. Push before Linear update + cleanup
-5. Delete both local and remote branches
-6. Move to Done last — only after push succeeds
-7. Never force-push protected branches
-8. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
+3. Only `thoughts/retrospectives/LESSONS.md` may be auto-resolved (append-only union). Any other conflicted file → `merge --abort` and stop for a human
+4. Clean working tree on target branch before merging
+5. Push before Linear update + cleanup
+6. Delete both local and remote branches
+7. Move to Done last — only after push succeeds
+8. Never force-push protected branches
+9. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools

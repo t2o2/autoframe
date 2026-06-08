@@ -1,10 +1,10 @@
 ---
-description: Run a retrospective on a human-approved ticket — inspect the branch, reconstruct the journey, extract learnings, post findings as a comment, and hand off to merge
+description: Run a retrospective on a human-approved ticket — inspect the branch, reconstruct the journey, extract learnings, persist reusable lessons to the repo, post findings as a comment, and hand off to merge
 runInPlanMode: false
 scope: project
 ---
 
-Retrospective for a Linear ticket: while the branch is still live, inspect the actual diff and commit history, reconstruct the full journey from research through human review, extract process learnings, post a structured retro comment, append to the repo retrospective log, and move `Retrospective → Merging` to hand off to the approve stage. All Linear API via `~/.agents/skills/linear/` scripts. Read-only — no code changes, no merges.
+Retrospective for a Linear ticket: while the branch is still live, inspect the actual diff and commit history, reconstruct the full journey from research through human review, extract process learnings, post a structured retro comment, write the per-ticket artifact, **distil any novel reusable lesson into the curated `thoughts/retrospectives/LESSONS.md`, and commit those docs to the ticket branch** (they ride to develop via the approve merge), then move `Retrospective → Merging` to hand off to the approve stage. All Linear API via `~/.agents/skills/linear/` scripts. No product/source-code changes and no merges — the only writes are the retrospective docs under `thoughts/retrospectives/`.
 
 ## Request
 
@@ -137,14 +137,58 @@ Retro comment template:
 [1–3 suggestions for the pipeline itself — prompts, stage commands, acceptance criteria templates, etc.]
 ```
 
-### 4b — Write artifact to repo
+### 4b — Write the per-ticket artifact (into the worktree)
 
-Write the retrospective to `thoughts/retrospectives/{{ARGUMENTS}}.md` with the full content from 4a.
+All retro doc writes go **inside `${WORKTREE}`** so they ride the branch to develop via the approve merge. `${WORKTREE}` was resolved in Phase 2a.
 
-Also append a one-line entry to `thoughts/retrospectives/index.md` (create if absent):
+```bash
+mkdir -p "${WORKTREE}/thoughts/retrospectives"
+```
+
+Write the retrospective to `${WORKTREE}/thoughts/retrospectives/{{ARGUMENTS}}.md` with the full content from 4a.
+
+Also append a one-line entry to `${WORKTREE}/thoughts/retrospectives/index.md` (create if absent):
 ```
 - {{ARGUMENTS}}: [title] — [date] — [N changes-required cycles] — [key learning in one sentence]
 ```
+
+### 4c — Distil reusable lessons into the curated LESSONS.md
+
+This is the step that makes lessons persist and compound — `LESSONS.md` is read at the start of the research, plan, and process stages. Persist only what generalises **beyond this ticket**.
+
+Read the existing log first so you don't duplicate:
+```bash
+LESSONS="${WORKTREE}/thoughts/retrospectives/LESSONS.md"
+cat "${LESSONS}" 2>/dev/null
+```
+
+From the 3–6 learnings in Phase 3, keep only those that are **novel** (not already present anywhere in `LESSONS.md`) **and reusable** by future tickets of similar type. Drop anything that is ticket-specific trivia or merely reinforces an existing lesson.
+
+If at least one novel reusable lesson remains, **append** a single block to the end of the `## Retrospective Log` section (after the `<!-- New blocks are appended below this line -->` marker):
+```markdown
+
+### {{ARGUMENTS}} — [date] — [short title]
+- **[lesson title]**: [reusable, actionable guidance for similar future tickets]
+- …
+```
+
+Rules — these keep the file auto-mergeable across parallel branches:
+- **Append only.** Never edit or delete existing blocks, and never rewrite the `## Standing Lessons` section (that section is human-curated).
+- 1–4 bullets max per block; each must be reusable guidance, not a ticket-specific note.
+- **If no novel reusable lesson exists, make no change to `LESSONS.md`.** Empty-diff commits are noise.
+
+### 4d — Commit the retrospective docs to the ticket branch
+
+```bash
+git -C "${WORKTREE}" add thoughts/retrospectives/
+if git -C "${WORKTREE}" diff --cached --quiet; then
+  echo "No retro doc changes to commit"
+else
+  git -C "${WORKTREE}" commit -m "{{ARGUMENTS}}: docs: retrospective + lessons learnt"
+fi
+```
+
+This commit advances the local `${BRANCH}` ref; the approve stage's `merge --ff-only` (or union-resolved `--no-ff`) carries it to develop. **Do not push** — the approve stage owns the remote. **Do not `git add` anything outside `thoughts/retrospectives/`.**
 
 ---
 
@@ -166,10 +210,12 @@ Retrospective  →  Merging   (Phase 5)
 ## Critical Rules
 
 1. Claim before working — set Retrospective status first
-2. Read-only — no code changes, no merges, no worktree removal; `git diff`/`git log` is allowed
-3. Base all findings on the actual branch diff + comment history — do not invent or speculate
-4. Post retro comment before writing the artifact file
-5. Move to Merging last — only after comment + artifact are written
-6. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
-7. `thoughts/retrospectives/` directory must exist — create it if absent
-8. Never remove the worktree — it is owned by the approve stage
+2. No product/source-code changes and no merges. The **only** writes are the retro docs under `${WORKTREE}/thoughts/retrospectives/` (per-ticket artifact, index, and the curated `LESSONS.md`), committed to the ticket branch. `git diff`/`git log` for inspection is allowed.
+3. `LESSONS.md` is **append-only**: only add a new ticket-tagged block to the Retrospective Log, and only when the lesson is novel and reusable. Never edit existing blocks or the Standing Lessons section — this is what lets the approve stage auto-resolve concurrent appends.
+4. Base all findings on the actual branch diff + comment history — do not invent or speculate
+5. Post retro comment before writing the artifact/LESSONS files
+6. Commit the docs to the branch (Phase 4d), but **never push** — the approve stage owns the remote
+7. Move to Merging last — only after comment + docs are committed
+8. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
+9. All doc writes go under `${WORKTREE}/thoughts/retrospectives/` — create the dir if absent; never write to the main repo working tree
+10. Never remove the worktree — it is owned by the approve stage

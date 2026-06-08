@@ -26,6 +26,11 @@ RESEARCH_ARTIFACT="thoughts/tickets/{{ARGUMENTS}}/research.md"
 [ -f "$RESEARCH_ARTIFACT" ] && echo "Reading research artifact" || echo "Scanning Linear comments for research"
 ```
 
+Also read the cross-ticket lessons log and apply relevant prior learnings to the plan's approach, phasing, and risks:
+```bash
+cat thoughts/retrospectives/LESSONS.md 2>/dev/null
+```
+
 Extract: title, description, priority, labels, team ID, research findings (relevant files, patterns, complexity, decisions).
 
 Claim:

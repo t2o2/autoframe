@@ -34,6 +34,12 @@ If too vague (< 2 actionable sentences): `./scripts/ask-human.sh {{ARGUMENTS}} "
 
 ## Phase 2 — Identify Research Areas
 
+First, read the cross-ticket lessons log so prior retrospectives shape this research:
+```bash
+cat thoughts/retrospectives/LESSONS.md 2>/dev/null
+```
+Factor any relevant Standing Lessons and recent log entries into the research areas and risk flags below.
+
 Decompose ticket into research areas: affected services/components, relevant patterns, data models/interfaces, related tickets, risk areas.
 
 ---
