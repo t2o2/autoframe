@@ -6,6 +6,20 @@ scope: project
 
 Review a completed Linear ticket: run tests, validate in-browser, upload proof, post structured review, move to Human Review (PASS) or Changes Required (FAIL). All Linear API via `~/.agents/skills/linear/` scripts.
 
+## Environment Capabilities
+
+This container runs a **private Docker daemon** (Docker-in-Docker), isolated per agent. Use it to stand up the backing services the implementation needs for a faithful validation — a real database, message broker, or dependent service — so Phase 4 tests and Phase 5 proof exercise the change against genuine infrastructure instead of mocks. Prefer a throwaway real service over a stub whenever it raises confidence in the verdict.
+
+```bash
+docker run -d --rm --name dep-{{ARGUMENTS}}-review -e POSTGRES_PASSWORD=test -p 5432:5432 postgres:16-alpine
+# ... reachable at localhost:5432 while running tests / capturing proof ...
+docker rm -f dep-{{ARGUMENTS}}-review   # tear down before Phase 8 handoff
+```
+
+- The daemon is private to this container — images/containers you launch are invisible to other agents and wiped when the container exits.
+- Services you start share this agent's memory budget (`mem_limit`, default 8g) — keep them lean.
+- Always tear down what you start (`docker rm -f`) before handing off. Scope container names with the ticket ID to stay tidy.
+
 ## Request
 
 Ticket ID: {{ARGUMENTS}}

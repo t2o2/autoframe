@@ -147,4 +147,18 @@ ENV RUSTC_WRAPPER=sccache \
 
 ENV PATH="/home/agent/.cargo/bin:$PATH"
 
-ENTRYPOINT ["/usr/local/bin/entrypoint-pi.sh"]
+# ── Docker-in-Docker ──────────────────────────────────────────────────────────
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    docker.io \
+    gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN usermod -aG docker agent
+
+VOLUME /var/lib/docker
+
+COPY scripts/entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
+RUN chmod +x /usr/local/bin/entrypoint-dind.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint-dind.sh", "/usr/local/bin/entrypoint-pi.sh"]

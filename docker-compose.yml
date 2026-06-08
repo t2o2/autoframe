@@ -9,6 +9,7 @@ x-agent-base: &agent-base
       TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
   platform: linux/${DOCKER_PLATFORM:-arm64}
   working_dir: /workspace/repo
+  privileged: true
   depends_on:
     - redis
   mem_limit: ${AGENT_MEM_LIMIT:-8g}
@@ -25,6 +26,7 @@ x-agent-base: &agent-base
     # - ${HOME}/.ssh:/home/agent/.ssh:ro
     - cargo_target:/cache/cargo_target
     - sccache:/cache/sccache
+    - /var/lib/docker
   environment:
     - GIT_REPO_URL
     - GIT_BASE_BRANCH
@@ -54,6 +56,7 @@ x-pi-base: &pi-base
       TARGETARCH: ${DOCKER_TARGETARCH:-arm64}
   platform: linux/${DOCKER_PLATFORM:-arm64}
   working_dir: /workspace/repo
+  privileged: true
   mem_limit: ${AGENT_MEM_LIMIT:-8g}
   memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
   env_file:
@@ -66,6 +69,7 @@ x-pi-base: &pi-base
     - ${HOME}/.pi/agent:/opt/host-pi:ro
     - cargo_target:/cache/cargo_target
     - sccache:/cache/sccache
+    - /var/lib/docker
   environment:
     - GIT_REPO_URL
     - GIT_BASE_BRANCH

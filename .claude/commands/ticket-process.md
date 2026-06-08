@@ -6,6 +6,20 @@ scope: project
 
 Process a Linear ticket: fetch → claim → implement → test → proof → push. Each ticket gets its own worktree branch. All Linear API via `~/.agents/skills/linear/` scripts.
 
+## Environment Capabilities
+
+This container runs a **private Docker daemon** (Docker-in-Docker), isolated per agent. Use it whenever a ticket needs a real runtime dependency rather than a mock — a throwaway database, a message broker, a mock HTTP server, or any service the implementation, tests, or proof step require. Reach for it instead of stubbing when a genuine service gives higher-fidelity verification.
+
+```bash
+docker run -d --rm --name dep-{{ARGUMENTS}} -e POSTGRES_PASSWORD=test -p 5432:5432 postgres:16-alpine
+# ... reachable at localhost:5432 for tests / proof ...
+docker rm -f dep-{{ARGUMENTS}}   # tear down before handoff
+```
+
+- The daemon is private to this container — images/containers you launch are invisible to other agents and wiped when the container exits.
+- Services you start share this agent's memory budget (`mem_limit`, default 8g) — keep them lean.
+- Always tear down what you start (`docker rm -f`) before Phase 7 handoff, unless a later phase still needs it. Scope container names with the ticket ID to stay tidy.
+
 ## Request
 
 Ticket ID: {{ARGUMENTS}}

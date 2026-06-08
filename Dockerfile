@@ -120,4 +120,22 @@ ENV RUSTC_WRAPPER=sccache \
 
 ENV PATH="/home/agent/.cargo/bin:$PATH"
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# ── Docker-in-Docker ──────────────────────────────────────────────────────────
+# Re-enter root to install the daemon and gosu (Rust toolchain above ran as agent).
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    docker.io \
+    gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+# agent needs docker group membership to reach the socket after privilege drop
+RUN usermod -aG docker agent
+
+# Anonymous volume so overlay2 runs on a real fs (not the container's overlayfs root).
+# Each scaled replica gets its own — a named volume would corrupt shared state.
+VOLUME /var/lib/docker
+
+COPY scripts/entrypoint-dind.sh /usr/local/bin/entrypoint-dind.sh
+RUN chmod +x /usr/local/bin/entrypoint-dind.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint-dind.sh", "/usr/local/bin/entrypoint.sh"]
