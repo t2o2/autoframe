@@ -1,0 +1,13 @@
+#!/bin/bash
+# Auto-delete remote branches for feat/fix/chore patterns after they are merged.
+# Skips branches that are still active in a worktree (marked with '+').
+
+while IFS= read -r line; do
+  case "$line" in '+'*) continue ;; esac
+  branch="${line#\*}"; branch="${branch// /}"
+  case "$branch" in feat/*|fix/*|chore/*) ;; *) continue ;; esac
+  if git rev-parse "refs/remotes/origin/$branch" > /dev/null 2>&1; then
+    printf 'post-merge: deleting remote origin/%s\n' "$branch"
+    git push origin --delete "$branch" || printf 'post-merge: warning — could not delete origin/%s\n' "$branch"
+  fi
+done < <(git branch --merged HEAD)
