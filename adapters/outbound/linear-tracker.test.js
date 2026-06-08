@@ -142,3 +142,4 @@ describe('mapLinearResponse', () => {
     assert.equal(tickets[2].state, 'Changes Required');
   });
 });
+

@@ -11,11 +11,11 @@ describe('loadWorkflow', () => {
       assert.notEqual(config, null, 'Expected config to be non-null for valid workflow.toml');
     });
 
-    it('has all 5 stages present', () => {
+    it('has all 6 stages present', () => {
       const config = loadWorkflow(REAL_TOML);
       assert.notEqual(config, null);
       const stageNames = config.stages.map((s) => s.name);
-      assert.deepEqual(stageNames.sort(), ['approve', 'plan', 'process', 'research', 'review']);
+      assert.deepEqual(stageNames.sort(), ['approve', 'plan', 'process', 'research', 'retro', 'review']);
     });
 
     it('process stage poll states match the bash loader output', () => {
@@ -60,20 +60,6 @@ describe('loadWorkflow', () => {
       assert.notEqual(config, null);
       const process = config.stages.find((s) => s.name === 'process');
       assert.equal(process.stale_threshold_s, 1800);
-    });
-
-    it('process linear_stale_threshold_s is 3600', () => {
-      const config = loadWorkflow(REAL_TOML);
-      assert.notEqual(config, null);
-      const process = config.stages.find((s) => s.name === 'process');
-      assert.equal(process.linear_stale_threshold_s, 3600);
-    });
-
-    it('approve stage linear_stale_threshold_s can be empty string', () => {
-      const config = loadWorkflow(REAL_TOML);
-      assert.notEqual(config, null);
-      const approve = config.stages.find((s) => s.name === 'approve');
-      assert.equal(approve.linear_stale_threshold_s, '');
     });
 
     it('review stage done can be empty string', () => {

@@ -3,34 +3,6 @@ import assert from 'node:assert/strict';
 import { createScheduler } from './scheduler.js';
 import { createClaimStore } from './claim.js';
 
-/**
- * Build a minimal fake StorePort for tests.
- * running records live in an in-memory array per stage.
- * writeAttempt adds to the running list so _runningCount() is accurate within a tick.
- *
- * @param {Map<string, object[]>} initialRunning
- */
-function makeStore(initialRunning = new Map()) {
-  const running = new Map(initialRunning);
-  return {
-    writeHeartbeat() {},
-    readHeartbeat() {
-      return null;
-    },
-    writeAttempt(ticketId, stage, data) {
-      const list = running.get(stage) ?? [];
-      list.push(data);
-      running.set(stage, list);
-    },
-    listRunning(stage) {
-      return running.get(stage) ?? [];
-    },
-    _setRunning(stage, records) {
-      running.set(stage, records);
-    },
-  };
-}
-
 /** @returns {import('./ports.js').StageConfig} */
 function makeStage(overrides = {}) {
   return {
@@ -41,7 +13,6 @@ function makeStage(overrides = {}) {
     revert: 'Plan Approved',
     command: '/ticket-process',
     stale_threshold_s: 1800,
-    linear_stale_threshold_s: 3600,
     ...overrides,
   };
 }
@@ -71,6 +42,10 @@ describe('createScheduler', () => {
       const now = 2000000000000;
       const startedAt = now - (THRESHOLD_S + 1) * 1000;
 
+      // Claim acquired in the past so listRunning reports an old startedAt.
+      const staleClaims = createClaimStore({ clock: { now: () => startedAt } });
+      await staleClaims.acquire('ENG-99', 'engine', 'process');
+
       const revertedTickets = [];
       const tracker = {
         async fetchCandidates() {
@@ -87,20 +62,11 @@ describe('createScheduler', () => {
 
       const stage = makeStage({ stale_threshold_s: THRESHOLD_S });
 
-      const store = makeStore(
-        new Map([['process', [{ ticketId: 'ENG-99', startedAt, stage: 'process' }]]]),
-      );
-
-      await claims.acquire('ENG-99', 'engine');
-
-      const clock = { now: () => now };
-
       const scheduler = createScheduler({
         tracker,
         agent: { async run() {} },
-        claims,
-        store,
-        clock,
+        claims: staleClaims,
+        clock: { now: () => now },
         stages: [stage],
         config: { dispatch: { concurrency: 2 } },
       });
@@ -108,13 +74,16 @@ describe('createScheduler', () => {
       await scheduler.tick();
 
       assert.deepEqual(revertedTickets, ['ENG-99']);
-      assert.equal(await claims.isOwned('ENG-99'), false);
+      assert.equal(await staleClaims.isOwned('ENG-99', 'process'), false);
     });
 
     it('does not revert a running ticket within the stale threshold', async () => {
       const THRESHOLD_S = 1800;
       const now = 2000000000000;
       const startedAt = now - 60 * 1000;
+
+      const freshClaims = createClaimStore({ clock: { now: () => startedAt } });
+      await freshClaims.acquire('ENG-99', 'engine', 'process');
 
       const revertedTickets = [];
       const tracker = {
@@ -131,17 +100,11 @@ describe('createScheduler', () => {
       };
 
       const stage = makeStage({ stale_threshold_s: THRESHOLD_S });
-      const store = makeStore(
-        new Map([['process', [{ ticketId: 'ENG-99', startedAt, stage: 'process' }]]]),
-      );
-
-      await claims.acquire('ENG-99', 'engine');
 
       const scheduler = createScheduler({
         tracker,
         agent: { async run() {} },
-        claims,
-        store,
+        claims: freshClaims,
         clock: { now: () => now },
         stages: [stage],
         config: { dispatch: { concurrency: 2 } },
@@ -150,14 +113,204 @@ describe('createScheduler', () => {
       await scheduler.tick();
 
       assert.deepEqual(revertedTickets, []);
-      assert.equal(await claims.isOwned('ENG-99'), true);
+      assert.equal(await freshClaims.isOwned('ENG-99', 'process'), true);
+    });
+
+    it('does not revert when claim has a recent heartbeat, even past the claim age', async () => {
+      // The claim was acquired long ago (would be stale by claim-age alone), but
+      // the agent heartbeated 1 minute ago — it is alive, must NOT revert.
+      const THRESHOLD_S = 1800;
+      const now = 2000000000000;
+      const startedAt = now - (THRESHOLD_S + 600) * 1000; // claimed 40 min ago
+
+      const staleClaims = createClaimStore({ clock: { now: () => startedAt } });
+      await staleClaims.acquire('ENG-99', 'engine', 'process');
+      await staleClaims.heartbeat('ENG-99', 'engine', 'process', now - 60 * 1000); // 1 min ago
+
+      const revertedTickets = [];
+      const tracker = {
+        async fetchCandidates() { return []; },
+        async claimTicket() {},
+        async revertTicket(ticketId) { revertedTickets.push(ticketId); },
+        async getState() { return ''; },
+      };
+
+      const scheduler = createScheduler({
+        tracker,
+        agent: { async run() {} },
+        claims: staleClaims,
+        clock: { now: () => now },
+        stages: [makeStage({ stale_threshold_s: THRESHOLD_S })],
+        config: { dispatch: { concurrency: 2 } },
+      });
+
+      await scheduler.tick();
+
+      assert.deepEqual(revertedTickets, []);
+      assert.equal(await staleClaims.isOwned('ENG-99', 'process'), true);
+    });
+
+    it('reverts when both startedAt and lastHeartbeat are stale', async () => {
+      // Agent heartbeated, but the last heartbeat is also older than the threshold —
+      // the agent is dead or hung; revert it.
+      const THRESHOLD_S = 1800;
+      const now = 2000000000000;
+      const startedAt = now - (THRESHOLD_S + 600) * 1000; // 40 min ago
+
+      const staleClaims = createClaimStore({ clock: { now: () => startedAt } });
+      await staleClaims.acquire('ENG-99', 'engine', 'process');
+      // Heartbeat also stale — more than threshold ago
+      await staleClaims.heartbeat('ENG-99', 'engine', 'process', now - (THRESHOLD_S + 100) * 1000);
+
+      const revertedTickets = [];
+      const tracker = {
+        async fetchCandidates() { return []; },
+        async claimTicket() {},
+        async revertTicket(ticketId) { revertedTickets.push(ticketId); },
+        async getState() { return ''; },
+      };
+
+      const scheduler = createScheduler({
+        tracker,
+        agent: { async run() {} },
+        claims: staleClaims,
+        clock: { now: () => now },
+        stages: [makeStage({ stale_threshold_s: THRESHOLD_S })],
+        config: { dispatch: { concurrency: 2 } },
+      });
+
+      await scheduler.tick();
+
+      assert.deepEqual(revertedTickets, ['ENG-99']);
+    });
+  });
+
+  describe('heartbeat wiring', () => {
+    it('sends a heartbeat on the first onEvent call', async () => {
+      const now = 2000000000000;
+      const testClaims = createClaimStore({ clock: { now: () => now } });
+      const ticket = makeTicket({ id: 'ENG-1' });
+
+      let capturedOnEvent;
+      const agent = {
+        run({ onEvent }) {
+          capturedOnEvent = onEvent;
+          return new Promise(() => {}); // stays running
+        },
+      };
+
+      const scheduler = createScheduler({
+        tracker: {
+          async fetchCandidates() { return [ticket]; },
+          async claimTicket() {},
+          async revertTicket() {},
+          async getState() { return ''; },
+        },
+        agent,
+        claims: testClaims,
+        clock: { now: () => now },
+        stages: [makeStage()],
+        config: { dispatch: { concurrency: 1 } },
+      });
+
+      await scheduler.tick();
+      assert(capturedOnEvent !== undefined, 'onEvent should have been captured');
+
+      capturedOnEvent({ kind: 'text', text: 'working' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const [record] = await testClaims.listRunning('process');
+      assert.equal(record.lastHeartbeat, now);
+    });
+
+    it('does not send a second heartbeat within the debounce interval', async () => {
+      let now = 2000000000000;
+      const testClaims = createClaimStore({ clock: { now: () => now } });
+      const ticket = makeTicket({ id: 'ENG-1' });
+
+      let capturedOnEvent;
+      const agent = {
+        run({ onEvent }) {
+          capturedOnEvent = onEvent;
+          return new Promise(() => {});
+        },
+      };
+
+      const scheduler = createScheduler({
+        tracker: {
+          async fetchCandidates() { return [ticket]; },
+          async claimTicket() {},
+          async revertTicket() {},
+          async getState() { return ''; },
+        },
+        agent,
+        claims: testClaims,
+        clock: { now: () => now },
+        stages: [makeStage()],
+        config: { dispatch: { concurrency: 1 } },
+      });
+
+      await scheduler.tick();
+
+      // First call at now — sets lastHeartbeat
+      capturedOnEvent({ kind: 'text', text: 'a' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // 5 seconds later — still inside debounce window (30s)
+      now += 5000;
+      capturedOnEvent({ kind: 'text', text: 'b' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const [record] = await testClaims.listRunning('process');
+      assert.equal(record.lastHeartbeat, 2000000000000); // unchanged — first value
+    });
+
+    it('sends a new heartbeat after the debounce interval has elapsed', async () => {
+      let now = 2000000000000;
+      const testClaims = createClaimStore({ clock: { now: () => now } });
+      const ticket = makeTicket({ id: 'ENG-1' });
+
+      let capturedOnEvent;
+      const agent = {
+        run({ onEvent }) {
+          capturedOnEvent = onEvent;
+          return new Promise(() => {});
+        },
+      };
+
+      const scheduler = createScheduler({
+        tracker: {
+          async fetchCandidates() { return [ticket]; },
+          async claimTicket() {},
+          async revertTicket() {},
+          async getState() { return ''; },
+        },
+        agent,
+        claims: testClaims,
+        clock: { now: () => now },
+        stages: [makeStage()],
+        config: { dispatch: { concurrency: 1 } },
+      });
+
+      await scheduler.tick();
+
+      capturedOnEvent({ kind: 'text', text: 'a' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // Advance clock past debounce window (30s)
+      now += 31_000;
+      capturedOnEvent({ kind: 'text', text: 'b' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const [record] = await testClaims.listRunning('process');
+      assert.equal(record.lastHeartbeat, 2000000031000);
     });
   });
 
   describe('ticket dispatch', () => {
     it('claims and dispatches an unclaimed candidate ticket', async () => {
       const ticket = makeTicket();
-      const dispatchedCommands = [];
+      const agentRuns = [];
 
       const tracker = {
         async fetchCandidates() {
@@ -170,7 +323,6 @@ describe('createScheduler', () => {
         },
       };
 
-      const agentRuns = [];
       const agent = {
         async run(opts) {
           agentRuns.push(opts.command);
@@ -182,24 +334,56 @@ describe('createScheduler', () => {
         tracker,
         agent,
         claims,
-        store: makeStore(),
         clock: { now: () => Date.now() },
         stages: [makeStage()],
         config: { dispatch: { concurrency: 2 } },
       });
 
       await scheduler.tick();
-
       await new Promise((resolve) => setImmediate(resolve));
 
       assert.equal(agentRuns.length, 1);
       assert.equal(agentRuns[0], '/ticket-process ENG-1');
     });
 
-    it('skips an already-claimed ticket', async () => {
+    it('releases the claim after the agent completes so the ticket can be re-processed', async () => {
       const ticket = makeTicket();
 
-      await claims.acquire(ticket.id, 'engine');
+      const tracker = {
+        async fetchCandidates() {
+          return [ticket];
+        },
+        async claimTicket() {},
+        async revertTicket() {},
+        async getState() {
+          return '';
+        },
+      };
+
+      const agent = {
+        async run() {
+          return { exitCode: 0 };
+        },
+      };
+
+      const scheduler = createScheduler({
+        tracker,
+        agent,
+        claims,
+        clock: { now: () => Date.now() },
+        stages: [makeStage()],
+        config: { dispatch: { concurrency: 2 } },
+      });
+
+      await scheduler.tick();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.equal(await claims.isOwned(ticket.id, 'process'), false);
+    });
+
+    it('skips an already-claimed ticket', async () => {
+      const ticket = makeTicket();
+      await claims.acquire(ticket.id, 'engine', 'process');
 
       const tracker = {
         async fetchCandidates() {
@@ -224,17 +408,96 @@ describe('createScheduler', () => {
         tracker,
         agent,
         claims,
-        store: makeStore(),
         clock: { now: () => Date.now() },
         stages: [makeStage()],
         config: { dispatch: { concurrency: 2 } },
       });
 
       await scheduler.tick();
-
       await new Promise((resolve) => setImmediate(resolve));
 
       assert.equal(agentRuns.length, 0);
+    });
+
+    it('counts the concurrency cap per-container — another owner\'s claim does not consume a slot', async () => {
+      // A different container is already running ENG-9 in this stage.
+      await claims.acquire('ENG-9', 'other-container', 'process');
+
+      const ticket = makeTicket({ id: 'ENG-1' });
+      const tracker = {
+        async fetchCandidates() {
+          return [ticket];
+        },
+        async claimTicket() {},
+        async revertTicket() {},
+        async getState() {
+          return '';
+        },
+      };
+
+      const agentRuns = [];
+      const agent = {
+        run(opts) {
+          agentRuns.push(opts.command);
+          return new Promise(() => {});
+        },
+      };
+
+      const scheduler = createScheduler({
+        tracker,
+        agent,
+        claims,
+        clock: { now: () => Date.now() },
+        stages: [makeStage()],
+        config: { dispatch: { concurrency: 1 } },
+        owner: 'me',
+      });
+
+      await scheduler.tick();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // Cap is 1 and another container holds a claim, but it's not mine — so I
+      // still dispatch my one allowed agent. (A global cap would block here.)
+      assert.equal(agentRuns.length, 1);
+    });
+
+    it('reverts and releases a stale claim held by another container', async () => {
+      const THRESHOLD_S = 1800;
+      const now = 2000000000000;
+      const startedAt = now - (THRESHOLD_S + 1) * 1000;
+
+      // A remote container acquired the claim long ago, then died.
+      const staleClaims = createClaimStore({ clock: { now: () => startedAt } });
+      await staleClaims.acquire('ENG-99', 'dead-container', 'process');
+
+      const revertedTickets = [];
+      const tracker = {
+        async fetchCandidates() {
+          return [];
+        },
+        async claimTicket() {},
+        async revertTicket(ticketId) {
+          revertedTickets.push(ticketId);
+        },
+        async getState() {
+          return '';
+        },
+      };
+
+      const scheduler = createScheduler({
+        tracker,
+        agent: { async run() {} },
+        claims: staleClaims,
+        clock: { now: () => now },
+        stages: [makeStage({ stale_threshold_s: THRESHOLD_S })],
+        config: { dispatch: { concurrency: 2 } },
+        owner: 'me',
+      });
+
+      await scheduler.tick();
+
+      assert.deepEqual(revertedTickets, ['ENG-99']);
+      assert.equal(await staleClaims.isOwned('ENG-99', 'process'), false);
     });
 
     it('respects the concurrency cap', async () => {
@@ -267,14 +530,12 @@ describe('createScheduler', () => {
         tracker,
         agent,
         claims,
-        store: makeStore(),
         clock: { now: () => Date.now() },
         stages: [makeStage()],
         config: { dispatch: { concurrency: 2 } },
       });
 
       await scheduler.tick();
-
       await new Promise((resolve) => setImmediate(resolve));
 
       assert.equal(agentRuns.length, 2);

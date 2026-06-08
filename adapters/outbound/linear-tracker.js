@@ -183,5 +183,6 @@ export function createLinearTracker({ apiKey, teamKey }) {
       const nodes = data?.data?.issues?.nodes ?? [];
       return nodes[0]?.state?.name ?? '';
     },
+
   };
 }

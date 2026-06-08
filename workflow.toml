@@ -25,7 +25,6 @@ lock_prefix   = "research"
 stage_verb    = "researching"
 watch_states  = ["Todo", "Research"]
 stale_threshold_s        = 1800
-linear_stale_threshold_s = 3600
 
 [[stages]]
 name          = "plan"
@@ -40,7 +39,6 @@ lock_prefix   = "plan"
 stage_verb    = "planning"
 watch_states  = ["Research Approved", "Planning"]
 stale_threshold_s        = 1800
-linear_stale_threshold_s = 3600
 
 [[stages]]
 name          = "process"
@@ -55,7 +53,6 @@ lock_prefix   = "process"
 stage_verb    = "processing"
 watch_states  = ["Plan Approved", "Changes Required", "In Progress"]
 stale_threshold_s        = 1800
-linear_stale_threshold_s = 3600
 
 [[stages]]
 name          = "review"
@@ -70,7 +67,6 @@ lock_prefix   = "review"
 stage_verb    = "reviewing"
 watch_states  = ["Review Pending", "In Review"]
 stale_threshold_s        = 1800
-linear_stale_threshold_s = 3600
 
 [[stages]]
 name          = "retro"
@@ -85,7 +81,6 @@ lock_prefix   = "retro"
 stage_verb    = "retrospecting"
 watch_states  = ["Retrospective"]
 stale_threshold_s        = 1800
-linear_stale_threshold_s = ""
 
 [[stages]]
 name          = "approve"
@@ -100,7 +95,6 @@ lock_prefix   = "approve"
 stage_verb    = "approving"
 watch_states  = ["Merging"]
 stale_threshold_s        = 1800
-linear_stale_threshold_s = ""
 
 [preamble]
 text = """

@@ -23,7 +23,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  *
  * Matching the real workflow.toml structure:
  *   - done/pass_state/fail_state can be empty strings (e.g. review.done="", all non-review pass/fail="")
- *   - linear_stale_threshold_s can be empty string (approve stage) or a number
  */
 const StageSchema = z.object({
   name: z.string().min(1),
@@ -38,7 +37,6 @@ const StageSchema = z.object({
   stage_verb: z.string().min(1),
   watch_states: z.array(z.string()),
   stale_threshold_s: z.number(),
-  linear_stale_threshold_s: z.union([z.number(), z.literal('')]),
 });
 
 const WorkflowSchema = z.object({

@@ -1,28 +1,47 @@
 /**
  * scheduler.js — tick-driven state machine that reconciles + dispatches tickets.
  *
+ * The claim store is the single source of truth for in-flight work. A claim is
+ * held only while a stage is actively processing a ticket; it is released the
+ * moment the agent finishes, so the same ticket can be processed again later
+ * (the claim only prevents concurrent pickup, not re-processing).
+ *
  * tick() steps:
- *  1. For each stage, list running attempts from store; revert any that exceeded
- *     stale_threshold_s (in seconds → compare as ms against clock.now()).
+ *  1. For each stage, list running claims; revert any with no recent heartbeat.
+ *     Staleness is measured from the last heartbeat written by the agent's onEvent
+ *     stream, falling back to startedAt when no heartbeat has been sent yet —
+ *     baseline = max(startedAt, lastHeartbeat). A claim is stale when that
+ *     baseline is older than stale_threshold_s. An agent writing stdout keeps
+ *     resetting its clock (heartbeat fires at most once per HEARTBEAT_INTERVAL_MS
+ *     to avoid Redis churn); a silent/dead agent's heartbeat goes stale and the
+ *     revert fires before the Redis TTL would expire. Heartbeats also refresh the
+ *     claim TTL, so a live agent running past the original TTL never loses its
+ *     claim to expiry → the dispatch pass never re-acquires it (no double-exec).
+ *     Stale claims from ANY container are reverted — a dead container can't revert
+ *     its own, so a live one does it, releasing with the holder's owner.
  *  2. For each enabled stage, fetchCandidates and sortTickets.
  *  3. For each sorted candidate: skip if already claimed; acquire claim and fire
  *     agent.run() asynchronously (fire-and-forget with error handling).
- *  4. Respect the global concurrency cap from config.dispatch.concurrency.
+ *  4. Respect the per-container concurrency cap from config.dispatch.concurrency:
+ *     the count only includes claims held by THIS container's owner, so each
+ *     container dispatches up to `concurrency` agents independently.
  */
 
 import { sortTickets } from './dispatch.js';
 
 const SECONDS_TO_MS = 1000;
+const HEARTBEAT_INTERVAL_MS = 30 * SECONDS_TO_MS;
 
 /**
  * @typedef {Object} SchedulerDeps
  * @property {import('./ports.js').TrackerPort}  tracker
  * @property {import('./ports.js').AgentPort}    agent
  * @property {import('./ports.js').ClaimPort}    claims
- * @property {import('./ports.js').StorePort}    store
  * @property {import('./ports.js').ClockPort}    clock
  * @property {import('./ports.js').StageConfig[]} stages
  * @property {{ dispatch: { concurrency: number } }} config
+ * @property {string} [owner]   container identity; claims acquired here are tagged
+ *                              with it and the concurrency cap counts only these
  */
 
 /**
@@ -31,20 +50,24 @@ const SECONDS_TO_MS = 1000;
  * @param {SchedulerDeps} deps
  * @returns {{ tick(): Promise<void> }}
  */
-export function createScheduler({ tracker, agent, claims, store, clock, stages, config }) {
+export function createScheduler({ tracker, agent, claims, clock, stages, config, owner = 'engine' }) {
   const concurrency = config.dispatch.concurrency;
 
   /**
-   * Count currently running tickets across all stages.
-   * Uses store records as the source — the dispatcher writes a record immediately
-   * before fire-and-forget so the count is accurate within the same tick.
+   * Count tickets THIS container is running across all stages, derived from live
+   * claims filtered by owner — the concurrency cap is per-container, so another
+   * container's in-flight work does not consume this container's slots. Computed
+   * once per tick after the stale-revert pass; the dispatch loop then tracks
+   * newly-acquired claims with a local counter instead of re-scanning Redis for
+   * every candidate.
    *
-   * @returns {number}
+   * @returns {Promise<number>}
    */
-  function _runningCount() {
+  async function _runningCount() {
     let count = 0;
     for (const stage of stages) {
-      count += store.listRunning(stage.name).length;
+      const running = await claims.listRunning(stage.name);
+      count += running.filter((r) => r.owner === owner).length;
     }
     return count;
   }
@@ -54,15 +77,29 @@ export function createScheduler({ tracker, agent, claims, store, clock, stages, 
       const now = clock.now();
 
       for (const stage of stages) {
-        const running = store.listRunning(stage.name);
+        const running = await claims.listRunning(stage.name);
         const thresholdMs = stage.stale_threshold_s * SECONDS_TO_MS;
 
         for (const record of running) {
-          const ageMs = now - record.startedAt;
+          // Staleness is driven by the agent's heartbeat — each onEvent write
+          // updates lastHeartbeat in the claim and refreshes the Redis TTL.
+          // A claim younger than the threshold can never be stale (heartbeat can
+          // only push the baseline newer, never older), so skip early.
+          if (now - record.startedAt <= thresholdMs) continue;
+
+          // Past the claim age: use the most recent heartbeat as the baseline.
+          // Falls back to startedAt when no heartbeat has been sent yet (e.g. the
+          // agent was dispatched but hasn't produced any stdout — silent-dead
+          // agents revert at startedAt + threshold via this path).
+          const baselineMs = Math.max(record.startedAt, record.lastHeartbeat ?? 0);
+          const ageMs = now - baselineMs;
           if (ageMs > thresholdMs) {
             try {
               await tracker.revertTicket(record.ticketId, stage.revert);
-              await claims.release(record.ticketId, 'engine', stage.name);
+              // Release with the holder's own owner: deletes iff still owned by
+              // the (possibly dead, possibly remote) container we observed, so a
+              // freshly re-acquired claim is not clobbered.
+              await claims.release(record.ticketId, record.owner, stage.name);
             } catch (err) {
               console.error(
                 `[scheduler] Failed to revert stale ticket ${record.ticketId}: ${err.message}`,
@@ -72,8 +109,10 @@ export function createScheduler({ tracker, agent, claims, store, clock, stages, 
         }
       }
 
+      let runningCount = await _runningCount();
+
       for (const stage of stages) {
-        if (_runningCount() >= concurrency) break;
+        if (runningCount >= concurrency) break;
 
         let candidates;
         try {
@@ -86,36 +125,39 @@ export function createScheduler({ tracker, agent, claims, store, clock, stages, 
         const sorted = sortTickets(candidates);
 
         for (const ticket of sorted) {
-          if (_runningCount() >= concurrency) break;
+          if (runningCount >= concurrency) break;
 
           if (await claims.isOwned(ticket.id, stage.name)) continue;
 
-          const acquired = await claims.acquire(ticket.id, 'engine', stage.name, stage.stale_threshold_s);
+          const acquired = await claims.acquire(ticket.id, owner, stage.name, stage.stale_threshold_s);
           if (!acquired) continue;
-
-          const startedAt = clock.now();
-          store.writeAttempt(ticket.id, stage.name, { ticketId: ticket.id, startedAt, stage: stage.name });
+          runningCount++;
 
           const command = `${stage.command} ${ticket.id}`;
           const attemptNumber = 1;
 
+          let lastHeartbeatAt = 0;
           agent
             .run({
               command,
               cwd: '/workspace/worktrees',
               attempt: attemptNumber,
-              onEvent: () => {},
+              onEvent: () => {
+                const t = clock.now();
+                if (t - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
+                  lastHeartbeatAt = t;
+                  claims.heartbeat(ticket.id, owner, stage.name, t, stage.stale_threshold_s).catch(() => {});
+                }
+              },
             })
             .then(async () => {
-              // UNVERIFIED: completion does not clear the store attempt record —
-              // listRunning() grows unbounded across ticks; needs a StorePort.deleteAttempt()
-              // method and a multi-tick integration test before this is production-safe.
-              await claims.release(ticket.id, 'engine', stage.name);
+              // Releasing the claim frees the ticket for re-processing; the claim
+              // was the only thing preventing another worker from picking it up.
+              await claims.release(ticket.id, owner, stage.name);
             })
             .catch(async (err) => {
               console.error(`[scheduler] agent.run failed for ${ticket.id}: ${err.message}`);
-              // UNVERIFIED: same unbounded-store issue as the success path above.
-              await claims.release(ticket.id, 'engine', stage.name);
+              await claims.release(ticket.id, owner, stage.name);
             });
         }
       }

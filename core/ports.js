@@ -22,7 +22,6 @@
  * @property {string}   [pass_state]
  * @property {string}   [fail_state]
  * @property {number}   stale_threshold_s
- * @property {number|null} linear_stale_threshold_s
  */
 
 /**
@@ -61,18 +60,17 @@
  */
 
 /**
+ * ClaimPort — single source of truth for in-flight work. A claim exists only
+ * while a stage is actively processing a ticket; release() deletes it so the
+ * ticket can be processed again. Claims are namespaced by stage.
+ *
  * @typedef {Object} ClaimPort
- * @property {(ticketId: string, owner: string) => boolean} acquire   returns false if already claimed
- * @property {(ticketId: string, owner: string) => void} release
- * @property {(ticketId: string) => boolean} isOwned
- */
-
-/**
- * @typedef {Object} StorePort
- * @property {(ticketId: string, stage: string, data: object) => void} writeHeartbeat
- * @property {(ticketId: string, stage: string) => object|null} readHeartbeat
- * @property {(ticketId: string, stage: string, data: object) => void} writeAttempt
- * @property {(stage: string) => object[]} listRunning
+ * @property {(ticketId: string, owner: string, stage?: string, ttlSeconds?: number) => Promise<boolean>} acquire   returns false if already claimed
+ * @property {(ticketId: string, owner: string, stage?: string) => Promise<void>} release
+ * @property {(ticketId: string, stage?: string) => Promise<boolean>} isOwned
+ * @property {(ticketId: string, retryAt: number, stage?: string) => Promise<void>} queueRetry
+ * @property {(stage: string) => Promise<{ ticketId: string, startedAt: number, owner: string, lastHeartbeat?: number }[]>} listRunning   Running claims only (excludes retry-queued); owner identifies the holding container
+ * @property {(ticketId: string, owner: string, stage: string, ts: number, ttlSeconds: number) => Promise<void>} heartbeat   Update liveness timestamp; refreshes Redis TTL so a live agent never loses its claim to expiry
  */
 
 /**
