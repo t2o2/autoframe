@@ -368,8 +368,7 @@ start_stale_watchdog() {
                 # Release BEFORE the group-kill: with job control off the kill may
                 # also terminate this watchdog subshell, so do our cleanup first.
                 release_claim
-                kill -- "-$(ps -o pgid= -p "$pipe_pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
-                    || kill "$pipe_pid" 2>/dev/null || true
+                kill_pipeline_tree "$pipe_pid"
                 exit 0
             fi
         done
@@ -401,11 +400,13 @@ start_status_watcher() {
             done < <(tr ':' '\n' <<< "$allowed_states_str")
             if ! $allowed; then
                 log INFO "  $ticket_id advanced to '$state' — work complete, terminating pipeline"
-                kill -- "-$(ps -o pgid= -p "$pipe_pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
-                    || kill "$pipe_pid" 2>/dev/null || true
+                # Release the claim BEFORE killing the pipeline (mirrors the
+                # stale watchdog), then terminate the pipeline by its own
+                # process group — never the agent's.
                 rm -f "$hb_file" 2>/dev/null || true
                 [[ -n "$owner_pid_file" ]] && rm -f "$owner_pid_file" 2>/dev/null || true
                 rmdir "$lock_dir" 2>/dev/null || true
+                kill_pipeline_tree "$pipe_pid"
                 exit 0
             fi
         done
@@ -501,6 +502,29 @@ PIPELINE_PID=""
 CURRENT_LOCK_DIR=""
 CURRENT_HB_FILE=""
 CURRENT_OWNER_PID_FILE=""
+# The agent's own process group, captured once at load. Job control is off, so
+# without `set -m` a backgrounded pipeline shares this group — group-killing it
+# would broadcast SIGTERM to the agent itself (PID 1 in the container) and tear
+# down the whole poll loop. kill_pipeline_tree refuses to group-kill this group.
+AGENT_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
+# Terminate a pipeline and its descendants WITHOUT ever broadcast-killing the
+# agent. run_ticket launches the pipeline under `set -m`, so it has its OWN
+# process group: group-kill it so claude's children (chromium, MCP servers,
+# spawned shells) die too. If the pgid can't be resolved, is 1, or is the
+# agent's own group (the legacy job-control-off case), a group kill would take
+# down the agent — fall back to killing just the tracked subtree by PID.
+kill_pipeline_tree() {
+    local pid="$1"
+    [[ -z "$pid" ]] && return 0
+    local pgid
+    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
+    if [[ -n "$pgid" && "$pgid" != "1" && "$pgid" != "$AGENT_PGID" ]]; then
+        kill -- "-$pgid" 2>/dev/null || true
+    else
+        pkill -P "$pid" 2>/dev/null || true
+        kill "$pid" 2>/dev/null || true
+    fi
+}
 
 process_ticket() {
     local ticket_id="$1"
@@ -549,6 +573,9 @@ process_ticket() {
 
         start_heartbeat "$ticket_id" "$HB_FILE"
 
+        # Launch the pipeline in its own process group (`set -m`) so the
+        # watchdogs/interrupt can group-kill it without broadcasting to the agent.
+        set -m
         if (( attempt == 1 )); then
             log INFO "Starting fresh session for $ticket_id"
             (
@@ -576,6 +603,7 @@ process_ticket() {
             ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
         fi
         PIPELINE_PID=$!
+        set +m
         echo "$PIPELINE_PID" > "$owner_pid_file"
 
         start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID" \
@@ -655,8 +683,7 @@ on_interrupt() {
     stop_status_watcher
     stop_stale_watchdog
     if [[ -n "$PIPELINE_PID" ]]; then
-        kill -- "-$(ps -o pgid= -p "$PIPELINE_PID" 2>/dev/null | tr -d ' ')" 2>/dev/null \
-            || kill "$PIPELINE_PID" 2>/dev/null || true
+        kill_pipeline_tree "$PIPELINE_PID"
     fi
     pkill -P $$ -TERM 2>/dev/null || true
     sleep 0.3

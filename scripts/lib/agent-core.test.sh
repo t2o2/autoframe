@@ -106,5 +106,79 @@ assert "removes a stale orphaned heartbeat file" \
     bash -c "! [[ -f /tmp/${PREFIX}-heartbeat-GYL-103.txt ]]"
 
 echo ""
+echo "kill_pipeline_tree — broadcast safety"
+
+# Wait (up to ~1s) for a set of pid files to be populated.
+_await_pids() {
+    local f ok
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        ok=true
+        for f in "$@"; do [[ -s "$f" ]] || ok=false; done
+        $ok && return 0
+        sleep 0.1
+    done
+}
+
+# Kill a process group only if it is real and NOT the test runner's own group —
+# `kill -- "-0"`/`-<our-pgid>` would take down the harness itself.
+_safe_group_kill() {
+    local g="$1" mine
+    [[ -z "$g" || "$g" == "0" ]] && return 0
+    mine=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+    [[ "$g" == "$mine" ]] && return 0
+    kill -- "-$g" 2>/dev/null || true
+}
+
+# 6. Pipeline shares a process group with a sibling that stands in for the agent
+#    (job control off → the pipeline and the agent share one group). The helper
+#    must kill ONLY the pipeline subtree, never the shared group — a group kill
+#    there broadcasts SIGTERM to the agent (PID 1). The scenario is launched
+#    under `set -m` so it gets its OWN group, isolated from the test runner; a
+#    regression that broadcasts can therefore only hit this isolated group.
+cleanup
+SENT="/tmp/${PREFIX}-sentinel.pid"; TGT="/tmp/${PREFIX}-target.pid"; CHD="/tmp/${PREFIX}-child.pid"
+rm -f "$SENT" "$TGT" "$CHD"
+set -m
+bash -c "
+    sleep 60 & echo \$! > '$SENT'
+    bash -c 'sleep 60 & echo \$! > \"$CHD\"; wait' & echo \$! > '$TGT'
+    wait
+" &
+iso=$!
+set +m
+_await_pids "$SENT" "$TGT" "$CHD"
+sent_pid=$(cat "$SENT" 2>/dev/null); tgt_pid=$(cat "$TGT" 2>/dev/null); chd_pid=$(cat "$CHD" 2>/dev/null)
+# The agent's group == the shared (isolated) group the sentinel lives in.
+AGENT_PGID=$(ps -o pgid= -p "$sent_pid" 2>/dev/null | tr -d ' ')
+kill_pipeline_tree "$tgt_pid"
+sleep 0.5
+assert "spares a same-group sibling (no broadcast kill)" \
+    bash -c "kill -0 ${sent_pid:-0} 2>/dev/null"
+assert "kills the targeted pipeline subtree (target + child)" \
+    bash -c "! kill -0 ${tgt_pid:-1} 2>/dev/null && ! kill -0 ${chd_pid:-1} 2>/dev/null"
+_safe_group_kill "$AGENT_PGID"
+kill "$iso" "$sent_pid" "$tgt_pid" "$chd_pid" 2>/dev/null || true
+wait "$iso" 2>/dev/null || true
+rm -f "$SENT" "$TGT" "$CHD"
+
+# 7. Pipeline in its OWN process group (as run_ticket launches it under `set -m`):
+#    the helper group-kills, reaping the whole tree including grandchildren.
+cleanup
+GC="/tmp/${PREFIX}-gchild.pid"; rm -f "$GC"
+AGENT_PGID=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+set -m
+bash -c "sleep 60 & echo \$! > '$GC'; sleep 60" &
+own=$!
+set +m
+_await_pids "$GC"
+gc_pid=$(cat "$GC" 2>/dev/null)
+kill_pipeline_tree "$own"
+sleep 0.3
+assert "group-kills an own-group pipeline including its grandchild" \
+    bash -c "! kill -0 ${own:-1} 2>/dev/null && ! kill -0 ${gc_pid:-1} 2>/dev/null"
+kill "$own" "$gc_pid" 2>/dev/null || true
+rm -f "$GC"
+
+echo ""
 echo "Passed: $PASS  Failed: $FAIL"
 [[ $FAIL -eq 0 ]]
