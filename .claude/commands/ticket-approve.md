@@ -12,6 +12,16 @@ Ticket ID: {{ARGUMENTS}}
 
 ---
 
+## Inputs — Artifacts First
+
+This stage is purely mechanical (merge + cleanup) and needs **no** comment thread — only ticket metadata (`parentId`, branch). Never pull the thread here.
+
+- **Metadata fetch (no thread):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'`
+
+`get-issue.sh` always embeds the full comment thread; the `del(.comments)` projection strips it inside the subprocess, keeping it out of context.
+
+---
+
 ## Phase 0 — Identify Context
 
 ```bash
@@ -32,9 +42,9 @@ WORKTREE="../worktrees/${BRANCH}"
 
 ## Phase 0.5 — Resolve Merge Target
 
-Check for parent ticket in Linear:
+Check for parent ticket in Linear (metadata only — no thread):
 ```bash
-bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}"
+bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'
 ```
 
 If `parentId` exists → fetch parent → resolve parent's branch (`feat/` or `fix/`). If parent branch not found → fall back to main branch.
@@ -144,11 +154,12 @@ Merging  →  Done  (after merge + push)
 ## Critical Rules
 
 1. Use `git -C "${MAIN_REPO}"` for all main-repo operations — never `cd`
-2. `--ff-only` first, fall back to `--no-ff` on diverged histories
-3. Only `thoughts/retrospectives/LESSONS.md` may be auto-resolved (append-only union). Any other conflicted file → `merge --abort` and stop for a human
-4. Clean working tree on target branch before merging
-5. Push before Linear update + cleanup
-6. Delete both local and remote branches
-7. Move to Done last — only after push succeeds
-8. Never force-push protected branches
-9. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
+2. Metadata only — never pull the comment thread (fetch uses `jq 'del(.comments)'`)
+3. `--ff-only` first, fall back to `--no-ff` on diverged histories
+4. Only `thoughts/retrospectives/LESSONS.md` may be auto-resolved (append-only union). Any other conflicted file → `merge --abort` and stop for a human
+5. Clean working tree on target branch before merging
+6. Push before Linear update + cleanup
+7. Delete both local and remote branches
+8. Move to Done last — only after push succeeds
+9. Never force-push protected branches
+10. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools

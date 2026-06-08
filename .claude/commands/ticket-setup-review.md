@@ -14,11 +14,14 @@ Ticket ID: {{ARGUMENTS}}
 
 ## Phase 0 — Fetch Ticket & Find Branch
 
+Locate the branch from `handoff.md` first (written by `/ticket-process`); fetch ticket metadata without the thread:
 ```bash
-bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}"
+HANDOFF="thoughts/tickets/{{ARGUMENTS}}/handoff.md"
+[ -f "$HANDOFF" ] && grep -iE '^branch' "$HANDOFF"
+bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'
 ```
 
-Find branch from comments (`**Branch:** \`feat/{{ARGUMENTS}}\`` or `fix/`). Fallback: `git fetch --all --prune && git branch -r | grep "{{ARGUMENTS}}"`.
+Fallbacks if no handoff: pull the thread on demand (`get-issue.sh … | jq -r '.comments.nodes[] | .body'`) and match `**Branch:** \`feat/{{ARGUMENTS}}\`` or `fix/`, then `git fetch --all --prune && git branch -r | grep "{{ARGUMENTS}}"`.
 
 No branch → stop: "Run `/ticket-process {{ARGUMENTS}}` first."
 

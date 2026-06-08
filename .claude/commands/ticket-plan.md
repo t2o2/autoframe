@@ -12,18 +12,30 @@ Ticket ID: {{ARGUMENTS}}
 
 ---
 
+## Inputs — Artifacts First
+
+Prior stages hand off through `thoughts/tickets/{{ARGUMENTS}}/`, not the Linear thread. Read the artifact(s) below first; treat the comment thread as a fallback you pull **on demand** — only when an artifact is missing, or for data only the thread carries (human replies, timestamps, branch name).
+
+- **Primary input (this stage):** `research.md` — findings, relevant files, patterns, complexity, key decisions.
+- **Metadata fetch (no thread):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'`
+- **Thread on demand (only if `research.md` is missing):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq -r '.comments.nodes[] | "[\(.createdAt)] \(.user.name): \(.body)"'`
+
+`get-issue.sh` always embeds the full comment thread; the `del(.comments)` projection strips it inside the subprocess, keeping it out of context until you deliberately pull it.
+
+---
+
 ## Phase 1 — Fetch Ticket & Research
 
-Fetch in parallel:
-```bash
-bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}"
-bash ~/.agents/skills/linear/list-states.sh
-```
-
-Check research artifact first:
+Read the research artifact first — it is the handoff from the research stage:
 ```bash
 RESEARCH_ARTIFACT="thoughts/tickets/{{ARGUMENTS}}/research.md"
-[ -f "$RESEARCH_ARTIFACT" ] && echo "Reading research artifact" || echo "Scanning Linear comments for research"
+[ -f "$RESEARCH_ARTIFACT" ] && cat "$RESEARCH_ARTIFACT" || echo "No artifact — fall back to pulling the research comment on demand"
+```
+
+Fetch ticket metadata (no thread) in parallel:
+```bash
+bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'
+bash ~/.agents/skills/linear/list-states.sh
 ```
 
 Also read the cross-ticket lessons log and apply relevant prior learnings to the plan's approach, phasing, and risks:
@@ -31,7 +43,7 @@ Also read the cross-ticket lessons log and apply relevant prior learnings to the
 cat thoughts/retrospectives/LESSONS.md 2>/dev/null
 ```
 
-Extract: title, description, priority, labels, team ID, research findings (relevant files, patterns, complexity, decisions).
+Extract: title, description, priority, labels, team ID (from metadata) + research findings (from `research.md`, or the on-demand thread pull if the artifact is absent).
 
 Claim:
 ```bash
@@ -114,7 +126,7 @@ Planning           →  Plan Pending Approval (Phase 5)
 
 ## Critical Rules
 
-1. Read research first — extract all prior findings before exploring
+1. Read `research.md` first — artifact is the handoff; pull the Linear thread only if it is missing (metadata fetch uses `jq 'del(.comments)'`)
 2. Phases must be independently testable
 3. Concrete file references — every change names the exact path
 4. No implementation — plan only, zero code changes

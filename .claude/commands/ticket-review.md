@@ -12,11 +12,23 @@ Ticket ID: {{ARGUMENTS}}
 
 ---
 
+## Inputs — Artifacts First
+
+Prior stages hand off through `thoughts/tickets/{{ARGUMENTS}}/`, not the Linear thread. Read the artifact(s) below first; treat the comment thread as a fallback you pull **on demand** — only when an artifact is missing, or for data only the thread carries (human replies, timestamps, branch name).
+
+- **Primary input (this stage):** `implementation.md` (what process actually built — files, deviations, test results, proof URLs) + `plan.md` (acceptance criteria, claimed files) + `handoff.md` (branch, commit) + the git diff. `research.md` for context.
+- **Metadata fetch (no thread):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'`
+- **Thread on demand (branch fallback / human notes):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq -r '.comments.nodes[] | "[\(.createdAt)] \(.user.name): \(.body)"'`
+
+`get-issue.sh` always embeds the full comment thread; the `del(.comments)` projection strips it inside the subprocess, keeping it out of context until you deliberately pull it.
+
+---
+
 ## Phase 0 — Claim & Locate Branch
 
-Fetch in parallel:
+Fetch metadata (no thread) in parallel:
 ```bash
-bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}"
+bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'
 bash ~/.agents/skills/linear/list-states.sh
 ```
 
@@ -26,7 +38,12 @@ bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <in_revi
 bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Picking up review for {{ARGUMENTS}}."
 ```
 
-Find branch from comments (`.comments.nodes[].body`): match `**Branch:** \`feat/{{ARGUMENTS}}\`` or `fix/`. Fallback: `git branch -r | grep "{{ARGUMENTS}}"`.
+Locate the branch from `handoff.md` first (written by `/ticket-process` Phase 0):
+```bash
+HANDOFF="thoughts/tickets/{{ARGUMENTS}}/handoff.md"
+[ -f "$HANDOFF" ] && grep -iE '^branch' "$HANDOFF"
+```
+Fallbacks if absent: pull the thread on demand and match `**Branch:** \`feat/{{ARGUMENTS}}\`` or `fix/`, then `git branch -r | grep "{{ARGUMENTS}}"`.
 
 No branch found → post comment, move to Changes Required, exit.
 
@@ -56,12 +73,15 @@ All reads/writes use `$WORKTREE`.
 
 ## Phase 2 — Understand Implementation
 
-From comments + thought store, extract: files changed, acceptance criteria, ticket type.
+From the artifacts first, extract: what was built + files changed (`implementation.md`), acceptance criteria + claimed scope (`plan.md`), ticket type. Read the thread on demand only for anything the artifacts don't cover.
 
 ```bash
-[ -f "thoughts/tickets/{{ARGUMENTS}}/plan.md" ] && echo "Plan found"
-[ -f "thoughts/tickets/{{ARGUMENTS}}/research.md" ] && echo "Research found"
+[ -f "thoughts/tickets/{{ARGUMENTS}}/implementation.md" ] && cat "thoughts/tickets/{{ARGUMENTS}}/implementation.md"
+[ -f "thoughts/tickets/{{ARGUMENTS}}/plan.md" ] && cat "thoughts/tickets/{{ARGUMENTS}}/plan.md"
+[ -f "thoughts/tickets/{{ARGUMENTS}}/research.md" ] && echo "Research artifact available for deeper context"
 ```
+
+If `implementation.md` is absent (older ticket), fall back to the completion comment via the on-demand thread pull.
 
 No implementation found (no commits beyond develop) → post comment, Changes Required, exit.
 
@@ -206,7 +226,7 @@ In Review       →  Changes Required (FAIL)
 
 ## Critical Rules
 
-1. Read existing comments first — don't redo completed work
+1. Artifacts first (`plan.md`, `handoff.md`, git diff) — pull the Linear thread only on demand (metadata fetch uses `jq 'del(.comments)'`); don't redo completed work
 2. Never PASS without running tests — if tests can't run, FAIL
 3. Write missing tests before judging
 4. Visual proof mandatory — no exceptions. Browser failure = FAIL

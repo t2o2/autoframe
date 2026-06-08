@@ -12,15 +12,27 @@ Ticket ID: {{ARGUMENTS}}
 
 ---
 
+## Inputs — Artifacts First
+
+Prior stages hand off through `thoughts/tickets/{{ARGUMENTS}}/`, not the Linear thread. Read the artifact(s) below first; treat the comment thread as a fallback you pull **on demand** — only when an artifact is missing, or for data only the thread carries (human replies, timestamps, branch name).
+
+- **Primary input (this stage):** none — research is the entry point. The ticket **description** is the source of truth; pull the thread once only if it carries human-provided context.
+- **Metadata fetch (no thread):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'`
+- **Thread on demand:** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq -r '.comments.nodes[] | "[\(.createdAt)] \(.user.name): \(.body)"'`
+
+`get-issue.sh` always embeds the full comment thread; the `del(.comments)` projection strips it inside the subprocess, keeping it out of context until you deliberately pull it.
+
+---
+
 ## Phase 1 — Fetch & Claim
 
-Fetch in parallel:
+Fetch metadata (no thread) in parallel:
 ```bash
-bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}"
+bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'
 bash ~/.agents/skills/linear/list-states.sh
 ```
 
-Parse: title, description, priority, labels, team ID. Comments in `.comments.nodes`.
+Parse: title, description, priority, labels, team ID. If the description references prior discussion, pull human comments once via the on-demand thread command above.
 
 Claim:
 ```bash
@@ -112,9 +124,10 @@ Research   →  Research Pending Approval   (Phase 5)
 ## Critical Rules
 
 1. Claim before exploring — set Research status first
-2. Document what IS — never suggest changes; read-only
-3. Concrete file:line references for every finding
-4. Post to Linear — research lives as ticket comment
-5. No code changes
-6. Wait for all sub-agents before synthesizing
-7. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
+2. Artifacts first; pull the Linear thread only on demand — metadata fetch uses `jq 'del(.comments)'`
+3. Document what IS — never suggest changes; read-only
+4. Concrete file:line references for every finding
+5. Post to Linear — research lives as ticket comment
+6. No code changes
+7. Wait for all sub-agents before synthesizing
+8. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools

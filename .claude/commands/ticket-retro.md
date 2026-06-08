@@ -12,15 +12,27 @@ Ticket ID: {{ARGUMENTS}}
 
 ---
 
+## Inputs — Artifacts First
+
+Prior stages hand off through `thoughts/tickets/{{ARGUMENTS}}/`, not the Linear thread. Read the artifact(s) below first; treat the comment thread as a fallback you pull **on demand** — only for data the artifacts and git don't carry (here: cycle counts and timestamps).
+
+- **Primary input (this stage):** git `log`/`diff` (the actual change) + `research.md`, `plan.md`, `implementation.md`, `review.md` (the journey substance).
+- **Metadata fetch (no thread):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'`
+- **Thread on demand (timeline & cycle counts — Phase 2b):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq -r '.comments.nodes[] | "[\(.createdAt)] \(.user.name): \(.body)"'`
+
+Unlike other stages, retro *does* need the thread — but for cycle/timestamp data only. Pull substance (what was found, planned, reviewed) from the artifacts; pull the thread for the audit timeline.
+
+---
+
 ## Phase 1 — Fetch & Claim
 
-Fetch in parallel:
+Fetch metadata (no thread) in parallel:
 ```bash
-bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}"
+bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'
 bash ~/.agents/skills/linear/list-states.sh
 ```
 
-Parse: title, description, priority, labels, comments (all of `.comments.nodes` — these carry the full audit trail from research through merge).
+Parse: title, description, priority, labels. Read `research.md`, `plan.md`, `implementation.md`, `review.md` for the journey substance; the full comment thread is pulled in Phase 2b for the audit timeline (cycle counts, timestamps).
 
 Claim:
 ```bash
@@ -57,7 +69,7 @@ Record: total files changed, lines added/removed, number of commits, commit mess
 
 ### 2b — Comment history
 
-Read the full comment history and reconstruct the timeline:
+Now pull the thread on demand (see Inputs block) and reconstruct the timeline. Prefer the artifacts for *what happened*; use the thread for *when* and *how many cycles*:
 
 - **Research phase**: what was found, complexity estimate, key decisions flagged
 - **Plan phase**: what approach was chosen, how closely the plan matched reality
@@ -210,12 +222,13 @@ Retrospective  →  Merging   (Phase 5)
 ## Critical Rules
 
 1. Claim before working — set Retrospective status first
-2. No product/source-code changes and no merges. The **only** writes are the retro docs under `${WORKTREE}/thoughts/retrospectives/` (per-ticket artifact, index, and the curated `LESSONS.md`), committed to the ticket branch. `git diff`/`git log` for inspection is allowed.
-3. `LESSONS.md` is **append-only**: only add a new ticket-tagged block to the Retrospective Log, and only when the lesson is novel and reusable. Never edit existing blocks or the Standing Lessons section — this is what lets the approve stage auto-resolve concurrent appends.
-4. Base all findings on the actual branch diff + comment history — do not invent or speculate
-5. Post retro comment before writing the artifact/LESSONS files
-6. Commit the docs to the branch (Phase 4d), but **never push** — the approve stage owns the remote
-7. Move to Merging last — only after comment + docs are committed
-8. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
-9. All doc writes go under `${WORKTREE}/thoughts/retrospectives/` — create the dir if absent; never write to the main repo working tree
-10. Never remove the worktree — it is owned by the approve stage
+2. Artifacts + git first for substance; pull the Linear thread on demand for timeline/cycle data only (metadata fetch uses `jq 'del(.comments)'`)
+3. No product/source-code changes and no merges. The **only** writes are the retro docs under `${WORKTREE}/thoughts/retrospectives/` (per-ticket artifact, index, and the curated `LESSONS.md`), committed to the ticket branch. `git diff`/`git log` for inspection is allowed.
+4. `LESSONS.md` is **append-only**: only add a new ticket-tagged block to the Retrospective Log, and only when the lesson is novel and reusable. Never edit existing blocks or the Standing Lessons section — this is what lets the approve stage auto-resolve concurrent appends.
+5. Base all findings on the actual branch diff + comment history — do not invent or speculate
+6. Post retro comment before writing the artifact/LESSONS files
+7. Commit the docs to the branch (Phase 4d), but **never push** — the approve stage owns the remote
+8. Move to Merging last — only after comment + docs are committed
+9. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
+10. All doc writes go under `${WORKTREE}/thoughts/retrospectives/` — create the dir if absent; never write to the main repo working tree
+11. Never remove the worktree — it is owned by the approve stage

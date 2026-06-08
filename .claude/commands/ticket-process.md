@@ -12,13 +12,25 @@ Ticket ID: {{ARGUMENTS}}
 
 ---
 
+## Inputs — Artifacts First
+
+Prior stages hand off through `thoughts/tickets/{{ARGUMENTS}}/`, not the Linear thread. Read the artifact(s) below first; treat the comment thread as a fallback you pull **on demand** — only when an artifact is missing, or for data only the thread carries (human replies, timestamps, branch name).
+
+- **Primary input (this stage):** `plan.md` (phase checklist, files, success criteria) → `research.md` for deeper context. `handoff.md` for resumption.
+- **Metadata fetch (no thread):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'`
+- **Thread on demand (only if `plan.md` is missing):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq -r '.comments.nodes[] | "[\(.createdAt)] \(.user.name): \(.body)"'`
+
+`get-issue.sh` always embeds the full comment thread; the `del(.comments)` projection strips it inside the subprocess, keeping it out of context until you deliberately pull it.
+
+---
+
 ## Phase 0 — Claim & Worktree Setup
 
 **Claim immediately — before any other work.**
 
-Fetch in parallel:
+Fetch metadata (no thread) in parallel:
 ```bash
-bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}"
+bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'
 bash ~/.agents/skills/linear/list-states.sh
 ```
 
@@ -66,13 +78,13 @@ HANDOFF="thoughts/tickets/{{ARGUMENTS}}/handoff.md"
 
 ## Phase 2 — Deep Analysis
 
-Check for plan artifact first (preferred over comment parsing):
+Read the plan artifact first (it is the handoff; only pull the plan comment on demand if absent):
 ```bash
 PLAN_ARTIFACT="thoughts/tickets/{{ARGUMENTS}}/plan.md"
-[ -f "$PLAN_ARTIFACT" ] && echo "Plan artifact found" || echo "No plan — checking comments"
+[ -f "$PLAN_ARTIFACT" ] && cat "$PLAN_ARTIFACT" || echo "No plan artifact — pull the plan comment via the on-demand thread command"
 ```
 
-Parse from Phase 0: title, description, priority, labels, status, team ID. Confirm branch type.
+Parse from Phase 0 metadata: title, description, priority, labels, status, team ID. Confirm branch type.
 
 **Dependency check:** If ticket has a parent, fetch siblings. If a prerequisite sibling is in Todo/Backlog, process it first automatically.
 
@@ -184,7 +196,35 @@ Update status:
 bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <review_pending_uuid>
 ```
 
-Post completion comment with: **Branch name** (required — reviewer reads this), files changed, test summary, inline screenshots `![alt]($ASSET_URL)`, API JSON blocks, "Next step: `/ticket-review {{ARGUMENTS}}`".
+Write the implementation artifact — this is the **content handoff to review** (so review reads artifacts-first instead of parsing the Linear thread). Write `thoughts/tickets/{{ARGUMENTS}}/implementation.md` with:
+
+```markdown
+## Implementation: {{ARGUMENTS}} — [Title]
+
+### Branch & Commit
+- **Branch:** `feat/{{ARGUMENTS}}` (or `fix/`)
+- **Commit:** <sha>  | **Base:** develop
+
+### What Was Built
+[2–4 sentences: the change, mapped to the plan phases]
+
+### Files Changed
+| File | Change |
+
+### Deviations from Plan
+[Anything done differently from `plan.md`, and why — or "none"]
+
+### Test Results
+[Suite | command | outcome; note any skipped/failing]
+
+### Proof
+[Asset URLs uploaded to Linear: `![alt]($ASSET_URL)` / API JSON paths in `${PROOF_DIR}/`]
+
+### Acceptance Criteria
+[Checklist — met / unmet]
+```
+
+Then post the completion comment with: **Branch name** (required — reviewer reads this), files changed, test summary, inline screenshots `![alt]($ASSET_URL)`, API JSON blocks, "Next step: `/ticket-review {{ARGUMENTS}}`". The comment mirrors `implementation.md` for the human-facing audit trail.
 
 Worktree stays — do not remove.
 
@@ -201,10 +241,12 @@ In Progress     →  Done             (Phase 7, self-contained)
 ## Critical Rules
 
 1. Claim first — In Progress before any file operation
-2. All paths use `$WORKTREE` — never touch the main repo
-3. Never work on `develop` directly
-4. Push before handing off — reviewer needs branch on origin
-5. Record branch name in completion comment
-6. Do not remove worktree — persists for review
-7. Visual proof mandatory — Phase 6 cannot be skipped
-8. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
+2. Read `plan.md` first — artifact is the handoff; pull the Linear thread only on demand (metadata fetch uses `jq 'del(.comments)'`)
+3. All paths use `$WORKTREE` — never touch the main repo
+4. Never work on `develop` directly
+5. Push before handing off — reviewer needs branch on origin
+6. Record branch name in completion comment
+7. Write `implementation.md` — the content handoff to review; the completion comment mirrors it
+8. Do not remove worktree — persists for review
+9. Visual proof mandatory — Phase 6 cannot be skipped
+10. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
