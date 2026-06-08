@@ -110,6 +110,13 @@ STALE_WATCHDOG_PID=""
 STATUS_WATCHER_PID=""
 SHUTTING_DOWN=false
 PROCESSOR=""
+# In-flight claim artifacts for the ticket currently in run_ticket. Tracked at
+# script scope so on_interrupt can release the lock when a signal arrives
+# mid-ticket — otherwise the lock dir outlives the process and livelocks the
+# stage on restart ("locked by another local agent — skipping").
+CURRENT_LOCK_DIR=""
+CURRENT_HB_FILE=""
+CURRENT_OWNER_PID_FILE=""
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 
@@ -412,7 +419,17 @@ start_stale_watchdog() {
     local hb_file="$2"
     local revert_state="$3"
     local pipe_pid="$4"
+    local lock_dir="${5:-}"
+    local owner_pid_file="${6:-}"
     (
+        # Release every claim artifact, never just the heartbeat. Removing the
+        # heartbeat while leaving the lock dir is exactly what stranded the lock
+        # and livelocked the stage.
+        release_claim() {
+            rm -f "$hb_file"
+            [[ -n "$owner_pid_file" ]] && rm -f "$owner_pid_file"
+            [[ -n "$lock_dir" ]] && rmdir "$lock_dir" 2>/dev/null || true
+        }
         while [[ -f "$hb_file" ]]; do
             sleep 60
             [[ ! -f "$hb_file" ]] && exit 0
@@ -420,7 +437,7 @@ start_stale_watchdog() {
                 printf "${YELLOW}[$(date '+%H:%M:%S')] ⚠  %s pipeline exited — reverting to '%s'${RESET}\n" \
                     "$ticket_id" "$revert_state"
                 revert_ticket_status "$ticket_id" "$revert_state"
-                rm -f "$hb_file"
+                release_claim
                 exit 0
             fi
             local mtime age
@@ -430,7 +447,10 @@ start_stale_watchdog() {
                 printf "${YELLOW}[$(date '+%H:%M:%S')] ⚠  %s silent %ds (process alive) — reverting to '%s'${RESET}\n" \
                     "$ticket_id" "$age" "$revert_state"
                 revert_ticket_status "$ticket_id" "$revert_state"
-                rm -f "$hb_file"
+                # Release the claim BEFORE the group-kill: with job control off the
+                # kill may also terminate this watchdog subshell, so do our own
+                # cleanup first rather than depend on reaching the next line.
+                release_claim
                 kill -- "-$(ps -o pgid= -p "$pipe_pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
                     || kill "$pipe_pid" 2>/dev/null || true
                 exit 0
@@ -471,6 +491,7 @@ start_status_watcher() {
                 kill -- "-$(ps -o pgid= -p "$pipe_pid" 2>/dev/null | tr -d ' ')" 2>/dev/null \
                     || kill "$pipe_pid" 2>/dev/null || true
                 rm -f "$hb_file" 2>/dev/null || true
+                rm -f "/tmp/${LOCK_PREFIX}-owner-${ticket_id}.pid" 2>/dev/null || true
                 rmdir "$lock_dir" 2>/dev/null || true
                 exit 0
             fi
@@ -503,10 +524,57 @@ revert_stale_claims() {
             log WARN "Stale claim: $ticket_id (${age}s old, revert→'$revert_state')"
             revert_ticket_status "$ticket_id" "$revert_state"
             rm -f "$hb"
+            rm -f "/tmp/${lock_prefix}-owner-${ticket_id}.pid"
             rmdir "/tmp/${lock_prefix}-lock-${ticket_id}" 2>/dev/null || true
         else
             log INFO "Active claim file found: $ticket_id (${age}s, within threshold)"
         fi
+    done
+
+    # Pass 2 — authoritative orphaned lock-dir sweep.
+    #
+    # Pass 1 above only sees tickets that still have a heartbeat file. A lock dir
+    # whose heartbeat was removed (by the stale watchdog, an interrupt, or a
+    # crash) is invisible to it and blocks the stage forever with
+    # "locked by another local agent — skipping". This is the production
+    # livelock. Because run_ticket is synchronous, no pipeline is ever running
+    # when this reaper executes (top of the poll loop, between tickets), so any
+    # lock dir present is by definition an orphan. We still verify liveness
+    # defensively: release every lock that lacks BOTH a live owner pipeline and
+    # a fresh heartbeat. Requiring both guards against PID reuse (a recycled
+    # owner PID alone, with a stale heartbeat, is still reaped).
+    local lock_dir lock_tid owner_pid_file owner_pid lock_hb owner_alive hb_fresh
+    for lock_dir in /tmp/${lock_prefix}-lock-*; do
+        [[ -d "$lock_dir" ]] || continue
+        lock_tid="${lock_dir##*/${lock_prefix}-lock-}"
+        owner_pid_file="/tmp/${lock_prefix}-owner-${lock_tid}.pid"
+        lock_hb="/tmp/${hb_prefix}-heartbeat-${lock_tid}.txt"
+
+        owner_alive=false
+        if [[ -f "$owner_pid_file" ]]; then
+            owner_pid=$(cat "$owner_pid_file" 2>/dev/null) || owner_pid=""
+            [[ -n "$owner_pid" ]] && kill -0 "$owner_pid" 2>/dev/null && owner_alive=true
+        fi
+
+        hb_fresh=false
+        if [[ -f "$lock_hb" ]]; then
+            mtime=$(python3 -c "import os,sys; print(int(os.path.getmtime(sys.argv[1])))" "$lock_hb" 2>/dev/null) || mtime=0
+            age=$(( $(date +%s) - mtime ))
+            (( age <= stale_secs )) && hb_fresh=true
+        fi
+
+        if $owner_alive && $hb_fresh; then
+            continue
+        fi
+
+        log WARN "Orphaned lock released: $lock_tid (owner_alive=$owner_alive hb_fresh=$hb_fresh)"
+        if [[ -f "$lock_hb" ]]; then
+            revert_state=$(cat "$lock_hb" 2>/dev/null) || revert_state=""
+            [[ -n "$revert_state" ]] && revert_ticket_status "$lock_tid" "$revert_state"
+            rm -f "$lock_hb"
+        fi
+        rm -f "$owner_pid_file"
+        rmdir "$lock_dir" 2>/dev/null || true
     done
 }
 
@@ -716,10 +784,15 @@ run_ticket() {
     fi
 
     local HB_FILE="/tmp/${LOCK_PREFIX}-heartbeat-${ticket_id}.txt"
+    local owner_pid_file="/tmp/${LOCK_PREFIX}-owner-${ticket_id}.pid"
     local revert_state
     revert_state=$(stage_compute_revert_state "$ticket_id")
     echo "$revert_state" > "$HB_FILE"
-    trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}'" RETURN
+    # Expose the in-flight artifacts so on_interrupt can release them on a signal.
+    CURRENT_LOCK_DIR="$lock_dir"
+    CURRENT_HB_FILE="$HB_FILE"
+    CURRENT_OWNER_PID_FILE="$owner_pid_file"
+    trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}' '${owner_pid_file}'; CURRENT_LOCK_DIR=''; CURRENT_HB_FILE=''; CURRENT_OWNER_PID_FILE=''" RETURN
 
     divider "═" "${STAGE_NAME}: $ticket_id"
     log WORK "Ticket  : $ticket_id"
@@ -739,8 +812,11 @@ run_ticket() {
                2>&1
     ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
     PIPELINE_PID=$!
+    # Record the pipeline PID so the reaper can detect a dead owner and release
+    # an orphaned lock even when a stale heartbeat file makes it look "active".
+    echo "$PIPELINE_PID" > "$owner_pid_file"
 
-    start_stale_watchdog "$ticket_id" "$HB_FILE" "$revert_state" "$PIPELINE_PID"
+    start_stale_watchdog "$ticket_id" "$HB_FILE" "$revert_state" "$PIPELINE_PID" "$lock_dir" "$owner_pid_file"
     start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" "$WATCH_STATES"
 
     wait "$PIPELINE_PID"
@@ -749,7 +825,7 @@ run_ticket() {
 
     stop_status_watcher
     stop_stale_watchdog
-    rm -f "$HB_FILE"
+    rm -f "$HB_FILE" "$owner_pid_file"
     rmdir "$lock_dir" 2>/dev/null || true
 
     stage_pre_revert_cleanup "$ticket_id"
@@ -795,6 +871,11 @@ on_interrupt() {
     pkill -P $$ -TERM 2>/dev/null || true
     sleep 0.3
     pkill -P $$ -KILL 2>/dev/null || true
+    # Release the in-flight ticket's claim so a restart doesn't find an orphaned
+    # lock dir and livelock on "locked by another local agent — skipping".
+    [[ -n "$CURRENT_HB_FILE" ]]        && rm -f "$CURRENT_HB_FILE"
+    [[ -n "$CURRENT_OWNER_PID_FILE" ]] && rm -f "$CURRENT_OWNER_PID_FILE"
+    [[ -n "$CURRENT_LOCK_DIR" ]]       && rmdir "$CURRENT_LOCK_DIR" 2>/dev/null || true
     rm -f "$PROCESSOR"
     log INFO "${STAGE_NAME} agent stopped (PID $$) — $(date '+%Y-%m-%d %H:%M:%S')"
     log INFO "Session log : $LOG_DIR/agent.log"
@@ -803,6 +884,9 @@ on_interrupt() {
 
 on_exit() {
     stop_heartbeat
+    [[ -n "$CURRENT_HB_FILE" ]]        && rm -f "$CURRENT_HB_FILE"
+    [[ -n "$CURRENT_OWNER_PID_FILE" ]] && rm -f "$CURRENT_OWNER_PID_FILE"
+    [[ -n "$CURRENT_LOCK_DIR" ]]       && rmdir "$CURRENT_LOCK_DIR" 2>/dev/null || true
     rm -f "$PROCESSOR"
 }
 
