@@ -130,6 +130,17 @@ services:
     environment:
       - AGENT_TIER=normal
 
+  # Spec-feedback loop (Claude variant): time-driven (nightly), not
+  # Linear-state-driven. Audits implementation vs the repo's docs/ spec corpus,
+  # files divergences as Backlog tickets (human promotes to Todo to execute).
+  # Knobs (SPEC_LOOP_RUN_ON_START, SPEC_LOOP_INTERVAL_S, SPEC_LOOP_AREAS,
+  # SPEC_LOOP_PUSH_REPORTS) come from .env via env_file.
+  spec-loop:
+    <<: *agent-base
+    container_name: agent-spec-loop
+    command: ["./scripts/autonomous-agent-spec-loop.sh"]
+    profiles: ["spec-loop", "all"]
+
   # ── Pi agents ─────────────────────────────────────────────────────────────────
   # Run all:  docker compose --profile all-pi up --build
   # Run one:  docker compose --profile process-pi up --build
