@@ -130,6 +130,16 @@ services:
     environment:
       - AGENT_TIER=normal
 
+  # Slack ticket intake bot: polls a Slack channel, refines requests into Linear
+  # tickets via Claude, and creates them when the user approves.
+  # Requires: SLACK_BOT_TOKEN, SLACK_TICKET_CHANNEL (or SLACK_CHANNEL),
+  #           ANTHROPIC_API_KEY, LINEAR_API_KEY, LINEAR_TEAM_KEY.
+  slack-listen:
+    <<: *agent-base
+    container_name: agent-slack-listen
+    command: ["./scripts/autonomous-agent-slack-listen.sh"]
+    profiles: ["slack-listen", "all"]
+
   # Spec-feedback loop (Claude variant): CHANGE-driven, not Linear-state-driven.
   # Polls GIT_BASE_BRANCH and, when new commits land, audits the docs/spec-map.yaml
   # areas whose files changed, files divergences as Backlog tickets (human promotes
