@@ -113,6 +113,23 @@ for f in /opt/autoframe/commands/*.md; do
     [[ -f "$dest" ]] || cp "$f" "$dest"
 done
 
+# Seed the spec-loop runner + agent definitions if the project doesn't ship its
+# own. The only project-specific input is docs/spec-map.yaml — projects without
+# one make the spec-loop agent a no-op. Only-if-absent, so a project can override.
+if [[ -d /opt/autoframe/spec-loop ]]; then
+    [[ -f "$WORKSPACE/scripts/spec-loop.sh" ]] || {
+        mkdir -p "$WORKSPACE/scripts"
+        cp /opt/autoframe/spec-loop/spec-loop.sh "$WORKSPACE/scripts/spec-loop.sh"
+        chmod +x "$WORKSPACE/scripts/spec-loop.sh"
+    }
+    mkdir -p "$WORKSPACE/.claude/agents"
+    for f in /opt/autoframe/spec-loop/agents/*.md; do
+        dest="$WORKSPACE/.claude/agents/$(basename "$f")"
+        [[ -f "$dest" ]] || cp "$f" "$dest"
+    done
+    echo "[entrypoint] spec-loop runner + agents seeded (only-if-absent)"
+fi
+
 echo "[entrypoint] Workspace ready at $WORKSPACE"
 
 # ── 3. Bootstrap ~/.claude from host config ──────────────────────────────────
