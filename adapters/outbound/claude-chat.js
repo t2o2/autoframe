@@ -58,8 +58,9 @@ export class ClaudeChat {
     return data.content?.[0]?.text ?? '';
   }
 
-  // Build a single text prompt with system context + full history and pipe it
-  // to `claude -p`. The CLI handles all auth modes (API key, OAuth, OpenRouter).
+  // Build a single text prompt with system context + full history and pass it
+  // to `claude -p <prompt>` — same flags pattern as createClaudeAgent so the
+  // OAuth token (CLAUDE_CODE_OAUTH_TOKEN) flows through env automatically.
   async _chatViaCli(messages, systemPrompt) {
     let prompt = `${systemPrompt}\n\n`;
     for (const msg of messages) {
@@ -71,8 +72,13 @@ export class ClaudeChat {
 
     const { stdout } = await execFileAsync(
       'claude',
-      ['-p', '--output-format', 'text'],
-      { input: prompt, timeout: 60_000 },
+      [
+        '--dangerously-skip-permissions',
+        '--no-session-persistence',
+        '-p', prompt,
+        '--output-format', 'text',
+      ],
+      { env: { ...process.env }, timeout: 60_000 },
     );
     return stdout.trim();
   }
