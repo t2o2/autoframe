@@ -3,41 +3,44 @@
 #
 # Spec-feedback loop agent (runtime-agnostic — works in both the Claude and pi
 # container variants; the target repo's scripts/spec-loop.sh auto-detects
-# whichever CLI is in PATH). Unlike the other agents this one is
-# TIME-driven, not Linear-state-driven: on a schedule it re-audits the repo's
-# implementation against its spec corpus and files divergences as Linear
-# Backlog tickets (the human arbitration buffer — autoframe's research agent
-# polls Todo, so nothing executes until a human promotes a ticket).
+# whichever CLI is in PATH).
 #
-# Pipeline per run (all logic lives IN THE TARGET REPO, this script just drives it):
-#   1. pin: git fetch + hard-reset to origin/$GIT_BASE_BRANCH
-#   2. run: bash scripts/spec-loop.sh   (describer → comparator → filer chain)
+# CHANGE-DRIVEN, not time-driven: polls origin/$GIT_BASE_BRANCH every
+# $SPEC_LOOP_POLL_INTERVAL_S seconds and re-audits ONLY when new commits have
+# landed — and only the spec-map areas whose mapped files actually changed.
+# Gap tickets are filed minutes after a merge, intraday. The comparator/filer
+# dedup (resolved-gaps.yaml + Linear search by GAP id) keeps repeat runs quiet.
+#
+# Pipeline per detected change:
+#   1. pin: git fetch + checkout origin/$GIT_BASE_BRANCH
+#   2. run: bash scripts/spec-loop.sh --changed-since <last-audited-sha>
+#      (first run / unknown sha: full audit of all areas)
 #   3. persist: commit + push docs/reviews/** so gap-id continuity and the
 #      audit trail survive this ephemeral container
 #
 # Env:
-#   SPEC_LOOP_RUN_ON_START   run immediately on container start (default: 1)
-#   SPEC_LOOP_INTERVAL_S     seconds between runs (default: 86400 = nightly)
-#   SPEC_LOOP_AREAS          space-separated area filter (default: all active)
-#   SPEC_LOOP_PUSH_REPORTS   commit+push docs/reviews after run (default: 1)
-#   GIT_BASE_BRANCH          branch to audit (default: develop)
+#   SPEC_LOOP_POLL_INTERVAL_S  seconds between branch polls (default: 300)
+#   SPEC_LOOP_AREAS            space-separated area filter — forces those areas
+#                              every audited change (default: changed-area detection)
+#   SPEC_LOOP_PUSH_REPORTS     commit+push docs/reviews after run (default: 1)
+#   GIT_BASE_BRANCH            branch to audit (default: develop)
 #
 # Usage:
-#   ./scripts/autonomous-agent-spec-loop-pi.sh [--once]
+#   ./scripts/autonomous-agent-spec-loop.sh [--once]
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$SCRIPT_DIR/autonomous-spec-loop-pi-logs"
+LOG_DIR="$SCRIPT_DIR/autonomous-spec-loop-logs"
 mkdir -p "$LOG_DIR"
 
 # Scripts are installed into <workspace-repo>/scripts by the entrypoint,
 # so the repo root is always the parent of this script's directory.
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BASE_BRANCH="${GIT_BASE_BRANCH:-develop}"
-RUN_ON_START="${SPEC_LOOP_RUN_ON_START:-1}"
-INTERVAL_S="${SPEC_LOOP_INTERVAL_S:-86400}"
+POLL_INTERVAL_S="${SPEC_LOOP_POLL_INTERVAL_S:-300}"
 PUSH_REPORTS="${SPEC_LOOP_PUSH_REPORTS:-1}"
+STATE_FILE="$LOG_DIR/last-audited-sha"
 ONCE=0
 [[ "${1:-}" == "--once" ]] && ONCE=1
 
@@ -50,70 +53,87 @@ if [[ -z "${LINEAR_API_KEY:-}" ]]; then
     exit 2
 fi
 
-run_spec_loop() {
+run_audit() {
+    local new_sha="$1" last_sha="$2"
     local stamp run_log
     stamp="$(date +%Y%m%d-%H%M%S)"
     run_log="$LOG_DIR/spec-loop-${stamp}.log"
 
     cd "$REPO_DIR" || { log ERROR "repo not found at $REPO_DIR"; return 1; }
 
-    # ── 1. Pin to the tip of the base branch ─────────────────────────────────
-    log INFO "Pinning to origin/$BASE_BRANCH"
-    git fetch origin "$BASE_BRANCH" >>"$run_log" 2>&1 || { log ERROR "git fetch failed"; return 1; }
-    git checkout -B "$BASE_BRANCH" "origin/$BASE_BRANCH" >>"$run_log" 2>&1 || { log ERROR "git checkout failed"; return 1; }
-    local sha; sha="$(git rev-parse --short HEAD)"
+    git checkout -B "$BASE_BRANCH" "$new_sha" >>"$run_log" 2>&1 \
+        || { log ERROR "git checkout $new_sha failed"; return 1; }
 
-    if [[ ! -x scripts/spec-loop.sh ]]; then
-        log WARN "scripts/spec-loop.sh not present on $BASE_BRANCH@$sha — has the spec-loop branch been merged?"
+    if [[ ! -f scripts/spec-loop.sh ]]; then
+        log WARN "scripts/spec-loop.sh not on $BASE_BRANCH@${new_sha:0:12} — merge the spec-loop branch first"
         return 1
     fi
 
-    # ── 2. Run the in-repo loop (describer → comparator → filer) ─────────────
-    log INFO "Running spec-loop @ $sha (areas: ${SPEC_LOOP_AREAS:-all})"
-    # shellcheck disable=SC2086
-    bash scripts/spec-loop.sh ${SPEC_LOOP_AREAS:-} >>"$run_log" 2>&1
-    local rc=$?
+    # ── Run the in-repo loop ──────────────────────────────────────────────────
+    local rc
+    if [[ -n "${SPEC_LOOP_AREAS:-}" ]]; then
+        log INFO "Auditing forced areas: $SPEC_LOOP_AREAS @ ${new_sha:0:12}"
+        # shellcheck disable=SC2086
+        bash scripts/spec-loop.sh $SPEC_LOOP_AREAS >>"$run_log" 2>&1; rc=$?
+    elif [[ -n "$last_sha" ]] && git cat-file -e "$last_sha" 2>/dev/null; then
+        log INFO "Auditing changes ${last_sha:0:12}..${new_sha:0:12}"
+        bash scripts/spec-loop.sh --changed-since "$last_sha" >>"$run_log" 2>&1; rc=$?
+    else
+        log INFO "No previous audit state — full audit @ ${new_sha:0:12}"
+        bash scripts/spec-loop.sh >>"$run_log" 2>&1; rc=$?
+    fi
+
     if [[ $rc -ne 0 ]]; then
         log ERROR "spec-loop.sh exited rc=$rc — see $run_log"
         return $rc
     fi
 
-    # ── 3. Persist gap reports + observed notes back to the remote ───────────
-    # Gap-id continuity (comparator numbers from existing reports) and the
-    # audit trail must survive this ephemeral clone. Docs-only push.
+    # ── Persist gap reports + observed notes back to the remote ──────────────
     if [[ "$PUSH_REPORTS" == "1" ]]; then
         git add docs/reviews/ >>"$run_log" 2>&1
         if ! git diff --cached --quiet; then
             git -c user.name="spec-loop-agent" -c user.email="spec-loop@autoframe.local" \
-                commit -m "GYL-440: spec-loop nightly audit @ ${sha} ($(date +%Y-%m-%d))
+                commit -m "GYL-440: spec-loop audit @ ${new_sha:0:12} ($(date '+%Y-%m-%d %H:%M'))
 
 Automated gap report + observed-behaviour refresh. Docs-only.
 Generated by autoframe spec-loop agent." >>"$run_log" 2>&1
             if git push origin "$BASE_BRANCH" >>"$run_log" 2>&1; then
                 log INFO "Pushed docs/reviews updates to $BASE_BRANCH"
+                # Record our own report commit so the next poll doesn't
+                # treat it as new upstream work.
+                new_sha="$(git rev-parse HEAD)"
             else
-                log WARN "Push failed (branch moved?) — reports remain in tickets; see $run_log"
-                git reset --hard "origin/$BASE_BRANCH" >>"$run_log" 2>&1
+                log WARN "Push failed (branch moved during audit?) — findings persist in tickets; see $run_log"
+                git reset --hard "$new_sha" >>"$run_log" 2>&1
             fi
         else
-            log INFO "No report changes to push"
+            log INFO "No report changes (clean audit or no areas affected)"
         fi
     fi
 
-    log INFO "Run complete — log: $run_log"
+    echo "$new_sha" > "$STATE_FILE"
+    log INFO "Audit complete @ ${new_sha:0:12} — log: $run_log"
 }
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
+# ── Main poll loop ────────────────────────────────────────────────────────────
 
-log INFO "spec-loop agent started (interval=${INTERVAL_S}s, base=$BASE_BRANCH, once=$ONCE)"
-
-if [[ "$RUN_ON_START" == "1" || "$ONCE" == "1" ]]; then
-    run_spec_loop || log WARN "initial run failed"
-    [[ "$ONCE" == "1" ]] && exit 0
-fi
+log INFO "spec-loop agent started (poll=${POLL_INTERVAL_S}s, base=$BASE_BRANCH, once=$ONCE)"
 
 while true; do
-    log INFO "Sleeping ${INTERVAL_S}s until next audit"
-    sleep "$INTERVAL_S"
-    run_spec_loop || log WARN "scheduled run failed"
+    cd "$REPO_DIR" 2>/dev/null || { log ERROR "repo not found at $REPO_DIR"; exit 1; }
+
+    if git fetch origin "$BASE_BRANCH" >/dev/null 2>&1; then
+        NEW_SHA="$(git rev-parse "origin/$BASE_BRANCH")"
+        LAST_SHA="$(cat "$STATE_FILE" 2>/dev/null || true)"
+
+        if [[ "$NEW_SHA" != "$LAST_SHA" ]]; then
+            log INFO "New commits on $BASE_BRANCH (${LAST_SHA:0:12} → ${NEW_SHA:0:12})"
+            run_audit "$NEW_SHA" "$LAST_SHA" || log WARN "audit failed — will retry next poll"
+        fi
+    else
+        log WARN "git fetch failed — retrying next poll"
+    fi
+
+    [[ "$ONCE" == "1" ]] && exit 0
+    sleep "$POLL_INTERVAL_S"
 done
