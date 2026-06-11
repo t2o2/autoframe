@@ -77,6 +77,14 @@ COPY spec-loop /opt/autoframe/spec-loop
 RUN chmod +x /opt/autoframe/spec-loop/*.sh
 COPY workflow.toml /opt/autoframe/workflow.toml
 
+# Bake the autoframe Node.js engine so node-based agents (e.g. slack-listen)
+# can run from /opt/autoframe without touching the cloned workspace repo.
+COPY package.json pnpm-lock.yaml /opt/autoframe/
+COPY main.js /opt/autoframe/
+COPY core /opt/autoframe/core
+COPY adapters /opt/autoframe/adapters
+RUN cd /opt/autoframe && pnpm install --frozen-lockfile --prod
+
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

@@ -17,7 +17,26 @@ export class SlackClient {
       body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (!data.ok) throw new Error(`Slack ${method}: ${data.error}`);
+    if (!data.ok) {
+      const detail = data.response_metadata?.messages?.join('; ');
+      throw new Error(`Slack ${method}: ${data.error}${detail ? ` (${detail})` : ''}`);
+    }
+    return data;
+  }
+
+  /** GET-style call — sends params as URL query string (for methods like conversations.replies). */
+  async get(method, params) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])
+    ).toString();
+    const res = await fetch(`https://slack.com/api/${method}?${qs}`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      const detail = data.response_metadata?.messages?.join('; ');
+      throw new Error(`Slack ${method}: ${data.error}${detail ? ` (${detail})` : ''}`);
+    }
     return data;
   }
 
@@ -51,12 +70,13 @@ export class SlackClient {
     return this.call('conversations.history', body);
   }
 
-  /** Fetch all messages in a thread (including the root). */
-  async getThreadReplies(channelId, threadTs) {
-    return this.call('conversations.replies', {
+  /** Fetch messages in a thread after `oldest` (unix float string). */
+  async getThreadReplies(channelId, threadTs, oldest) {
+    return this.get('conversations.replies', {
       channel: channelId,
       ts: threadTs,
       limit: 100,
+      oldest: oldest || undefined,
     });
   }
 
@@ -76,5 +96,10 @@ export class SlackClient {
   /** Add an emoji reaction to a message. Requires reactions:write scope. */
   async addReaction(channelId, ts, emoji = 'eyes') {
     return this.call('reactions.add', { channel: channelId, timestamp: ts, name: emoji });
+  }
+
+  /** Remove an emoji reaction from a message. Requires reactions:write scope. */
+  async removeReaction(channelId, ts, emoji = 'eyes') {
+    return this.call('reactions.remove', { channel: channelId, timestamp: ts, name: emoji });
   }
 }

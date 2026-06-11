@@ -16,10 +16,11 @@
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# The autoframe engine is baked into the image at /opt/autoframe, not in the
+# cloned workspace repo (which belongs to the target project, not autoframe).
+AUTOFRAME_DIR="/opt/autoframe"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [slack-listen] $*"; }
 
 log "Starting Slack ticket intake bot..."
-exec node "$REPO_DIR/main.js" slack-listen
+exec node "$AUTOFRAME_DIR/main.js" slack-listen

@@ -89,7 +89,14 @@ export async function startSlackListener({
         continue;
       }
 
-      const data = await slack.getThreadReplies(channelId, threadTs);
+      let data;
+      try {
+        data = await slack.getThreadReplies(channelId, threadTs, lastSeen);
+      } catch (err) {
+        console.error(`[slack-listener] thread ${threadTs} replies error: ${err.message}`);
+        continue;
+      }
+
       const newReplies = (data.messages ?? [])
         .filter((m) => m.ts !== threadTs)       // skip root
         .filter((m) => !m.bot_id && !m.subtype) // skip bot messages
@@ -107,34 +114,58 @@ export async function startSlackListener({
 
   async function onNewMessage(channelId, threadTs, userText) {
     console.log(`[slack-listener] new message thread=${threadTs} text="${userText.slice(0, 80)}"`);
-    await slack.addReaction(channelId, threadTs).catch(() => {});
-    await runTurn(channelId, threadTs, userText);
+    await runTurn(channelId, threadTs, userText, threadTs);
   }
 
   async function onThreadReply(channelId, threadTs, replyTs, userText) {
     console.log(`[slack-listener] thread reply thread=${threadTs} text="${userText.slice(0, 80)}"`);
-    await slack.addReaction(channelId, replyTs).catch(() => {});
-    await runTurn(channelId, threadTs, userText);
+    await runTurn(channelId, threadTs, userText, replyTs);
   }
 
-  async function runTurn(channelId, threadTs, userText) {
+  // `reactTs` is the ts of the user's message we acknowledge with :eyes: while
+  // processing, then clear once we've replied.
+  async function runTurn(channelId, threadTs, userText, reactTs) {
+    let reacted = false;
+    try {
+      await slack.addReaction(channelId, reactTs);
+      reacted = true;
+    } catch (err) {
+      console.error(`[slack-listener] addReaction failed for ${reactTs}: ${err.message}`);
+    }
+
+    const clearReaction = async () => {
+      if (!reacted) return;
+      await slack.removeReaction(channelId, reactTs)
+        .catch((err) => console.error(`[slack-listener] removeReaction failed for ${reactTs}: ${err.message}`));
+    };
+
     let result;
     try {
       result = await refiner.processMessage(threadTs, userText);
     } catch (err) {
       console.error('[slack-listener] Claude error:', err.message);
-      await slack.replyInThread(channelId, threadTs, `:x: Claude error: ${err.message}`);
+      await slack.replyInThread(channelId, threadTs, `:x: Claude error: ${err.message}`).catch(() => {});
+      await clearReaction();
       return;
     }
 
-    if (!result) return;
+    if (!result) {
+      await clearReaction();
+      return;
+    }
 
-    if (result.type === 'reply') {
-      await slack.replyInThread(channelId, threadTs, result.text);
-    } else if (result.type === 'cancelled') {
-      await slack.replyInThread(channelId, threadTs, ':wave: Ticket creation cancelled.');
-    } else if (result.type === 'create_ticket') {
-      await createTicket(channelId, threadTs, result.draft);
+    try {
+      if (result.type === 'reply') {
+        await slack.replyInThread(channelId, threadTs, result.text);
+      } else if (result.type === 'cancelled') {
+        await slack.replyInThread(channelId, threadTs, ':wave: Ticket creation cancelled.');
+      } else if (result.type === 'create_ticket') {
+        await createTicket(channelId, threadTs, result.draft);
+      }
+    } catch (err) {
+      console.error(`[slack-listener] failed to post reply for thread ${threadTs}: ${err.message}`);
+    } finally {
+      await clearReaction();
     }
   }
 

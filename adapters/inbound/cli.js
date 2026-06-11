@@ -4,6 +4,7 @@
  * Commands:
  *   node main.js run --stage <name|all> [--dry-run]
  *   node main.js status
+ *   node main.js slack-listen
  */
 
 /**
@@ -32,6 +33,10 @@ export function parseArgs(argv) {
     return { command: 'status' };
   }
 
+  if (command === 'slack-listen') {
+    return { command: 'slack-listen' };
+  }
+
   return { command: command ?? 'help' };
 }
 
@@ -52,7 +57,11 @@ Commands:
            --stage all       Run all stages with global concurrency cap.
            --dry-run         Print what would run; exit without connecting to Linear.
 
-  status   Print running claims from the claim store (requires REDIS_URL).
+  status       Print running claims from the claim store (requires REDIS_URL).
+
+  slack-listen Poll a Slack channel and refine tasks into Linear tickets via Claude.
+               Requires: SLACK_BOT_TOKEN, SLACK_TICKET_CHANNEL (or SLACK_CHANNEL),
+                         ANTHROPIC_API_KEY, LINEAR_API_KEY, LINEAR_TEAM_KEY.
 
 Environment:
   WORKFLOW_TOML         Path to workflow.toml (optional; falls back to discovery)

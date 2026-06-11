@@ -3,3 +3,4 @@ thoughts/
 *.md
 .env*
 setup.sh
+node_modules
