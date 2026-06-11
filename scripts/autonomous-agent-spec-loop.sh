@@ -169,9 +169,24 @@ run_audit() {
         return $rc
     fi
 
+    # Stage reports once (intent-to-add covers brand-new gap files) so both the
+    # findings notification and the push block see a consistent diff vs HEAD.
+    git add docs/reviews/ >>"$run_log" 2>&1
+
+    # ── Surface findings to the feedback channel (best-effort, never blocks) ──
+    local changed_gaps finding_count areas_list
+    changed_gaps="$(git diff --cached --name-only HEAD -- docs/reviews/gaps/ 2>/dev/null)"
+    if [[ -n "$changed_gaps" ]]; then
+        finding_count="$(git diff --cached HEAD -- docs/reviews/gaps/ 2>/dev/null | grep -c '^+### GAP-' || true)"
+        if [[ "${finding_count:-0}" -gt 0 ]]; then
+            areas_list="$(echo "$changed_gaps" | sed -E 's#.*/[0-9-]+-(.*)\.md#\1#' | sort -u | tr '\n' ' ')"
+            "$SCRIPT_DIR/notify-human.sh" ":mag: *spec-loop* audited *${areas_list}* @ \`${new_sha:0:12}\` — ${finding_count} new/changed finding(s) filed to the *${TEAM_KEY}* Backlog for arbitration." || true
+            log INFO "Notified feedback channel: ${finding_count} finding(s) in ${areas_list}"
+        fi
+    fi
+
     # ── Persist gap reports + observed notes back to the remote ──────────────
     if [[ "$PUSH_REPORTS" == "1" ]]; then
-        git add docs/reviews/ >>"$run_log" 2>&1
         if ! git diff --cached --quiet; then
             # Resolve the commit prefix. An explicit override wins; otherwise the
             # agent creates a fresh per-run tracking ticket and uses ITS id, so

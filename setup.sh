@@ -83,6 +83,7 @@ SCRIPTS=(
     "scripts/autonomous-agent-review.sh"
     "scripts/autonomous-agent-approve.sh"
     "scripts/ask-human.sh"
+    "scripts/notify-human.sh"
     # Shared library + per-stage config the refactored scripts source at runtime.
     # NOTE: this list is hand-maintained — every new file under scripts/lib or
     # scripts/stages (and any rename) must be added here or the install silently
