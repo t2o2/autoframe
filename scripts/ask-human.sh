@@ -47,7 +47,19 @@ TELEGRAM_BOT_TOKEN="$(read_env TELEGRAM_BOT_TOKEN)"
 TELEGRAM_CHAT_ID="$(read_env TELEGRAM_CHAT_ID)"
 LINEAR_API_KEY="$(read_env LINEAR_API_KEY)"
 
-if [[ -n "$SLACK_BOT_TOKEN" && -n "$SLACK_CHANNEL" ]]; then
+if [[ -n "${HUMAN_FEEDBACK_CHANNEL:-}" ]]; then
+    CHANNEL="$HUMAN_FEEDBACK_CHANNEL"
+    if [[ "$CHANNEL" == "slack" && ( -z "$SLACK_BOT_TOKEN" || -z "$SLACK_CHANNEL" ) ]]; then
+        echo "ERROR: HUMAN_FEEDBACK_CHANNEL=slack but SLACK_BOT_TOKEN or SLACK_CHANNEL is missing" >&2
+        exit 2
+    elif [[ "$CHANNEL" == "telegram" && ( -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHAT_ID" ) ]]; then
+        echo "ERROR: HUMAN_FEEDBACK_CHANNEL=telegram but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing" >&2
+        exit 2
+    elif [[ "$CHANNEL" != "slack" && "$CHANNEL" != "telegram" ]]; then
+        echo "ERROR: HUMAN_FEEDBACK_CHANNEL must be 'slack' or 'telegram', got '$CHANNEL'" >&2
+        exit 2
+    fi
+elif [[ -n "$SLACK_BOT_TOKEN" && -n "$SLACK_CHANNEL" ]]; then
     CHANNEL=slack
 elif [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
     CHANNEL=telegram

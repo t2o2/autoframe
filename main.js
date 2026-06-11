@@ -93,10 +93,15 @@ async function runCommand({ stage, dryRun }) {
     process.exit(1);
   }
 
+  const channel = resolveChannel();
+
   const { createLinearTracker } = await import('./adapters/outbound/linear-tracker.js');
   const { createClaudeAgent } = await import('./adapters/outbound/claude-agent.js');
   const { createScheduler } = await import('./core/scheduler.js');
   const { createPollDriver } = await import('./adapters/inbound/poll-driver.js');
+
+  // Propagate resolved channel to shell scripts (ask-human.sh, notify-human.sh)
+  process.env.HUMAN_FEEDBACK_CHANNEL = channel;
 
   const tracker = createLinearTracker({ apiKey, teamKey });
   const agent = createClaudeAgent();
@@ -104,6 +109,7 @@ async function runCommand({ stage, dryRun }) {
   const { claims, label } = await createClaims();
   console.log(`[autoframe] Claim store: ${label}`);
   console.log(`[autoframe] Container owner: ${OWNER}`);
+  console.log(`[autoframe] Feedback channel: ${channel}`);
 
   const clock = { now: () => Date.now() };
   const POLL_INTERVAL_MS = 60_000;
@@ -136,6 +142,26 @@ async function runCommand({ stage, dryRun }) {
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+/**
+ * Resolve the feedback channel from environment credentials.
+ * Slack takes priority when both channels are configured.
+ * Exits with a clear error if neither channel has complete credentials.
+ *
+ * @returns {'slack'|'telegram'}
+ */
+function resolveChannel() {
+  const hasSlack = !!(process.env.SLACK_BOT_TOKEN && process.env.SLACK_CHANNEL);
+  const hasTelegram = !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
+
+  if (hasSlack) return 'slack';
+  if (hasTelegram) return 'telegram';
+
+  console.error('Error: no feedback channel configured.');
+  console.error('  For Slack:    set SLACK_BOT_TOKEN and SLACK_CHANNEL');
+  console.error('  For Telegram: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID');
+  process.exit(1);
 }
 
 /**

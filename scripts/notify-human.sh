@@ -32,13 +32,19 @@ SLACK_CHANNEL="$(read_env SLACK_CHANNEL)"
 TELEGRAM_BOT_TOKEN="$(read_env TELEGRAM_BOT_TOKEN)"
 TELEGRAM_CHAT_ID="$(read_env TELEGRAM_CHAT_ID)"
 
-if [[ -n "$SLACK_BOT_TOKEN" && -n "$SLACK_CHANNEL" ]]; then
+_CHANNEL="${HUMAN_FEEDBACK_CHANNEL:-}"
+if [[ -z "$_CHANNEL" ]]; then
+    [[ -n "$SLACK_BOT_TOKEN" && -n "$SLACK_CHANNEL" ]] && _CHANNEL=slack
+    [[ -z "$_CHANNEL" && -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]] && _CHANNEL=telegram
+fi
+
+if [[ "$_CHANNEL" == "slack" ]]; then
     curl -sf -X POST "https://slack.com/api/chat.postMessage" \
         -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
         -H "Content-Type: application/json; charset=utf-8" \
         -d "$(jq -n --arg c "$SLACK_CHANNEL" --arg t "$MSG" '{channel:$c, text:$t, unfurl_links:false}')" \
         >/dev/null 2>&1 || true
-elif [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
+elif [[ "$_CHANNEL" == "telegram" ]]; then
     curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
         -H "Content-Type: application/json" \
         -d "$(jq -n --arg c "$TELEGRAM_CHAT_ID" --arg t "$MSG" '{chat_id:$c, text:$t, parse_mode:"Markdown"}')" \

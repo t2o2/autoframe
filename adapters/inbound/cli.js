@@ -55,9 +55,15 @@ Commands:
   status   Print running claims from the claim store (requires REDIS_URL).
 
 Environment:
-  WORKFLOW_TOML    Path to workflow.toml (optional; falls back to discovery)
-  LINEAR_API_KEY   Linear personal API key (required for non-dry-run)
-  LINEAR_TEAM_KEY  Linear team key e.g. ENG (required for non-dry-run)
-  REDIS_URL        Redis connection for shared claims (optional; in-memory if unset)
+  WORKFLOW_TOML         Path to workflow.toml (optional; falls back to discovery)
+  LINEAR_API_KEY        Linear personal API key (required for non-dry-run)
+  LINEAR_TEAM_KEY       Linear team key e.g. ENG (required for non-dry-run)
+  REDIS_URL             Redis connection for shared claims (optional; in-memory if unset)
+
+  Feedback channel (at least one pair required):
+  SLACK_BOT_TOKEN       Slack bot token   ┐ Slack is used when both are set.
+  SLACK_CHANNEL         Slack channel ID  ┘ Takes priority over Telegram if both channels are configured.
+  TELEGRAM_BOT_TOKEN    Telegram bot token   ┐ Telegram is used when both are set
+  TELEGRAM_CHAT_ID      Telegram chat ID     ┘ and Slack credentials are absent.
 `.trim());
 }
