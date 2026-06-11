@@ -130,11 +130,13 @@ services:
     environment:
       - AGENT_TIER=normal
 
-  # Spec-feedback loop (Claude variant): time-driven (nightly), not
-  # Linear-state-driven. Audits implementation vs the repo's docs/ spec corpus,
-  # files divergences as Backlog tickets (human promotes to Todo to execute).
-  # Knobs (SPEC_LOOP_RUN_ON_START, SPEC_LOOP_INTERVAL_S, SPEC_LOOP_AREAS,
-  # SPEC_LOOP_PUSH_REPORTS) come from .env via env_file.
+  # Spec-feedback loop (Claude variant): CHANGE-driven, not Linear-state-driven.
+  # Polls GIT_BASE_BRANCH and, when new commits land, audits the docs/spec-map.yaml
+  # areas whose files changed, files divergences as Backlog tickets (human promotes
+  # to Todo to execute), and pings the feedback channel on new findings. Idles if
+  # the target repo has no docs/spec-map.yaml. Knobs (SPEC_LOOP_POLL_INTERVAL_S,
+  # SPEC_LOOP_AREAS, SPEC_LOOP_PUSH_REPORTS, SPEC_LOOP_CREATE_RUN_TICKET) come from
+  # .env via env_file.
   spec-loop:
     <<: *agent-base
     container_name: agent-spec-loop
