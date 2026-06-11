@@ -171,6 +171,18 @@ services:
     command: ["./scripts/autonomous-agent-retro-pi.sh"]
     profiles: ["retro-pi", "all-pi"]
 
+  # Spec-feedback loop: time-driven (nightly), not Linear-state-driven.
+  # Audits implementation vs docs/ spec corpus on the target repo, files
+  # divergences as Backlog tickets (human promotes to Todo to execute).
+  # Spec-loop knobs (SPEC_LOOP_RUN_ON_START, SPEC_LOOP_INTERVAL_S,
+  # SPEC_LOOP_AREAS, SPEC_LOOP_PUSH_REPORTS) are read from .env via env_file —
+  # do NOT add an environment: block here, it would replace pi-base's list.
+  spec-loop-pi:
+    <<: *pi-base
+    container_name: agent-spec-loop-pi
+    command: ["./scripts/autonomous-agent-spec-loop-pi.sh"]
+    profiles: ["spec-loop-pi", "all-pi"]
+
   # ── Shared infrastructure ─────────────────────────────────────────────────────
   # No profile — starts whenever any agent profile is active (via depends_on).
   # Persistence disabled: claims are ephemeral; a restart clears stale locks
