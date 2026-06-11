@@ -26,6 +26,10 @@ switch (args.command) {
     await statusCommand();
     break;
 
+  case 'slack-listen':
+    await slackListenCommand();
+    break;
+
   default:
     printHelp();
     process.exit(0);
@@ -178,6 +182,41 @@ async function createClaims() {
   }
   const { createClaimStore } = await import('./adapters/outbound/claim-store.js');
   return { claims: createClaimStore(), label: 'in-memory (single-agent mode)', shared: false };
+}
+
+/**
+ * Handle `node main.js slack-listen` — starts the Slack ticket intake bot.
+ *
+ * Polls SLACK_TICKET_CHANNEL (falls back to SLACK_CHANNEL) for new messages,
+ * conducts a Claude-powered refinement conversation in thread, and creates a
+ * Linear ticket when the user approves the draft.
+ */
+async function slackListenCommand() {
+  const slackToken = process.env.SLACK_BOT_TOKEN;
+  const ticketChannel = process.env.SLACK_TICKET_CHANNEL || process.env.SLACK_CHANNEL;
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;   // may be absent when using OAuth
+  const linearApiKey = process.env.LINEAR_API_KEY;
+  const linearTeamKey = process.env.LINEAR_TEAM_KEY;
+
+  const missing = [];
+  if (!slackToken) missing.push('SLACK_BOT_TOKEN');
+  if (!ticketChannel) missing.push('SLACK_TICKET_CHANNEL (or SLACK_CHANNEL)');
+  // Accept either a direct API key or CLAUDE_CODE_OAUTH_TOKEN (handled by the claude CLI)
+  if (!anthropicApiKey && !process.env.CLAUDE_CODE_OAUTH_TOKEN) missing.push('ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN)');
+  if (!linearApiKey) missing.push('LINEAR_API_KEY');
+  if (!linearTeamKey) missing.push('LINEAR_TEAM_KEY');
+
+  if (missing.length) {
+    console.error(`Error: missing required env vars: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+
+  const { startSlackListener } = await import('./adapters/inbound/slack-listener.js');
+
+  process.on('SIGINT', () => { console.log('\n[slack-listener] Stopped.'); process.exit(0); });
+  process.on('SIGTERM', () => { console.log('[slack-listener] Stopped.'); process.exit(0); });
+
+  await startSlackListener({ slackToken, ticketChannel, anthropicApiKey, linearApiKey, linearTeamKey });
 }
 
 /**
