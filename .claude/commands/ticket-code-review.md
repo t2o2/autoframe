@@ -1,5 +1,5 @@
 ---
-description: Review a Linear ticket (input state: Review Pending) — run tests, validate in browser, move to Human Review or Changes Required
+description: Review a Linear ticket (input state: Code Review) — run tests, validate in browser, move to Human Review or Changes Required
 runInPlanMode: false
 scope: project
 ---
@@ -30,7 +30,7 @@ Ticket ID: {{ARGUMENTS}}
 
 Prior stages hand off through `thoughts/tickets/{{ARGUMENTS}}/`, not the Linear thread. Read the artifact(s) below first; treat the comment thread as a fallback you pull **on demand** — only when an artifact is missing, or for data only the thread carries (human replies, timestamps, branch name).
 
-- **Primary input (this stage):** `implementation.md` (what process actually built — files, deviations, test results, proof URLs) + `plan.md` (acceptance criteria, claimed files) + `handoff.md` (branch, commit) + the git diff. `research.md` for context.
+- **Primary input (this stage):** `implementation.md` (what the implement stage actually built — files, deviations, test results, proof URLs) + `plan.md` (acceptance criteria, claimed files) + `handoff.md` (branch, commit) + the git diff. `research.md` for context.
 - **Metadata fetch (no thread):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'`
 - **Thread on demand (branch fallback / human notes):** `bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq -r '.comments.nodes[] | "[\(.createdAt)] \(.user.name): \(.body)"'`
 
@@ -38,7 +38,7 @@ Prior stages hand off through `thoughts/tickets/{{ARGUMENTS}}/`, not the Linear 
 
 ---
 
-## Phase 0 — Claim & Locate Branch
+## Phase 0 — Locate Branch
 
 Fetch metadata (no thread) in parallel:
 ```bash
@@ -46,13 +46,12 @@ bash ~/.agents/skills/linear/get-issue.sh "{{ARGUMENTS}}" | jq 'del(.comments)'
 bash ~/.agents/skills/linear/list-states.sh
 ```
 
-Claim immediately:
+The ticket stays in **Code Review** while you work — the agent's filesystem lock prevents double-pickup, so no claim transition is needed. Post a start marker:
 ```bash
-bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <in_review_uuid>
 bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Picking up review for {{ARGUMENTS}}."
 ```
 
-Locate the branch from `handoff.md` first (written by `/ticket-process` Phase 0):
+Locate the branch from `handoff.md` first (written by `/ticket-implement` Phase 0):
 ```bash
 HANDOFF="thoughts/tickets/{{ARGUMENTS}}/handoff.md"
 [ -f "$HANDOFF" ] && grep -iE '^branch' "$HANDOFF"
@@ -71,7 +70,7 @@ WORKTREE="../worktrees/${BRANCH}"
 
 ## Phase 1 — Locate Worktree
 
-Reuse the implementation worktree from `/ticket-process`:
+Reuse the implementation worktree from `/ticket-implement`:
 ```bash
 git fetch origin "${BRANCH}"
 if wtp ls 2>/dev/null | grep -q "${BRANCH}"; then
@@ -226,16 +225,15 @@ bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <changes
 - **FAIL**: inform user, leave worktree untouched for implementer
 - **PASS**: `AskUserQuestion` — "Review PASSED. System still running at :8105/:8101/:8104. Full report on Linear. Move the ticket from **Human Review → Retrospective** to trigger the automated retrospective + merge."
 
-Worktree is NOT removed — owned by `/ticket-approve`.
+Worktree is NOT removed — owned by `/ticket-merge`.
 
 ---
 
 ## Status Transitions
 
 ```
-Review Pending  →  In Review        (Phase 0)
-In Review       →  Human Review     (PASS)
-In Review       →  Changes Required (FAIL)
+Code Review  →  Human Review     (PASS)
+Code Review  →  Changes Required (FAIL)
 ```
 
 ## Critical Rules

@@ -990,7 +990,7 @@ run_main_loop() {
         local pending=()
         while IFS= read -r tid; do
             if is_processed "$tid"; then
-                sed -i '' "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null || true
+                sed -i.bak "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null && rm -f "${PROCESSED_FILE}.bak" 2>/dev/null; true
                 log INFO "  $tid re-entered polling state — evicted from cache, will reprocess"
                 pending+=("$tid")
             else

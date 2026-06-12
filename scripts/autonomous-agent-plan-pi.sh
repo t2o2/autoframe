@@ -2,7 +2,7 @@
 # autonomous-agent-plan-pi.sh
 #
 # Pi-native version of the plan agent.
-# Polls Linear for "Research Approved" tickets, then creates plans for them
+# Polls Linear for "Planning" tickets, then creates plans for them
 # one-by-one using the /ticket-plan pi prompt template.
 #
 # Usage:
@@ -253,7 +253,7 @@ linear_gql() {
 }
 
 fetch_pending_tickets() {
-    log INFO "Querying Linear for 'Research Approved' tickets..."
+    log INFO "Querying Linear for 'Planning' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -262,7 +262,7 @@ fetch_pending_tickets() {
     fi
 
     local response
-    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Research Approved\"]}}}) { nodes { identifier } } }")
+    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Planning\"]}}}) { nodes { identifier } } }")
 
     if [[ -z "$response" ]]; then
         log WARN "Linear API call failed — will retry next cycle"
@@ -327,7 +327,7 @@ ticket_still_actionable() {
     local ticket_id="$1"
     local state
     state=$(get_ticket_state "$ticket_id") || return 1
-    [[ "$state" == "Research Approved" ]]
+    [[ "$state" == "Planning" ]]
 }
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────
@@ -542,11 +542,11 @@ process_ticket() {
     CURRENT_LOCK_DIR="$lock_dir"
     CURRENT_HB_FILE="$HB_FILE"
     CURRENT_OWNER_PID_FILE="$owner_pid_file"
-    local REVERT_STATE="Research Approved"
+    local REVERT_STATE="Planning"
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local _cur_state
         _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""
-        if [[ "$_cur_state" == "Research Approved" ]]; then
+        if [[ "$_cur_state" == "Planning" ]]; then
             REVERT_STATE="$_cur_state"
         fi
     fi
@@ -610,7 +610,7 @@ process_ticket() {
         start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID" \
             "$lock_dir" "$owner_pid_file"
         start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" \
-            "Research Approved:Planning" "$owner_pid_file"
+            "Planning" "$owner_pid_file"
 
         wait "$PIPELINE_PID"
         exit_code=$?
@@ -626,8 +626,6 @@ process_ticket() {
         fi
 
         if [[ -n "$final_state" \
-              && "$final_state" != "In Progress" \
-              && "$final_state" != "Research Approved" \
               && "$final_state" != "Planning" ]]; then
             log OK "✓ $ticket_id advanced to '$final_state' on attempt $attempt"
             break
@@ -635,10 +633,6 @@ process_ticket() {
 
         if (( attempt > MAX_CONTINUATIONS )); then
             log WARN "$ticket_id: exhausted $MAX_CONTINUATIONS continuation(s) — giving up"
-            if [[ "$final_state" == "In Progress" || "$final_state" == "Planning" ]]; then
-                log WARN "$ticket_id still '$final_state' — reverting to '$REVERT_STATE'"
-                revert_ticket_status "$ticket_id" "$REVERT_STATE"
-            fi
             break
         fi
 
@@ -657,7 +651,7 @@ process_ticket() {
     fi
 
     if ticket_still_actionable "$ticket_id"; then
-        log WARN "  $ticket_id still in Research Approved — will retry next poll"
+        log WARN "  $ticket_id still in Planning — will retry next poll"
         rm -rf "$session_dir"
     else
         echo "$ticket_id" >> "$PROCESSED_FILE"
@@ -737,7 +731,7 @@ main() {
     while true; do
         cycle=$((cycle + 1))
         revert_stale_local_claims "plan-pi"
-        revert_stale_linear_claims "Planning" "Research Approved" "plan-pi"
+        revert_stale_linear_claims "Planning" "Planning" "plan-pi"
         log INFO "Poll #${cycle} — $(date '+%Y-%m-%d %H:%M:%S')"
 
         local raw; raw=$(fetch_pending_tickets)
@@ -752,7 +746,7 @@ main() {
         local pending=()
         while IFS= read -r tid; do
             if is_processed "$tid"; then
-                sed -i '' "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null || true
+                sed -i.bak "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null && rm -f "${PROCESSED_FILE}.bak" 2>/dev/null; true
                 log INFO "  $tid re-entered polling state — evicted from cache, will reprocess"
             fi
             pending+=("$tid")

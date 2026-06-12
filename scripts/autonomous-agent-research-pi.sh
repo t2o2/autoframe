@@ -542,7 +542,7 @@ process_ticket() {
     CURRENT_LOCK_DIR="$lock_dir"
     CURRENT_HB_FILE="$HB_FILE"
     CURRENT_OWNER_PID_FILE="$owner_pid_file"
-    local REVERT_STATE="Plan Approved"
+    local REVERT_STATE="Todo"
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local _cur_state
         _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""
@@ -610,7 +610,7 @@ process_ticket() {
         start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID" \
             "$lock_dir" "$owner_pid_file"
         start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" \
-            "Todo:Research" "$owner_pid_file"
+            "Todo" "$owner_pid_file"
 
         wait "$PIPELINE_PID"
         exit_code=$?
@@ -626,19 +626,13 @@ process_ticket() {
         fi
 
         if [[ -n "$final_state" \
-              && "$final_state" != "In Progress" \
-              && "$final_state" != "Todo" \
-              && "$final_state" != "Research" ]]; then
+              && "$final_state" != "Todo" ]]; then
             log OK "✓ $ticket_id advanced to '$final_state' on attempt $attempt"
             break
         fi
 
         if (( attempt > MAX_CONTINUATIONS )); then
             log WARN "$ticket_id: exhausted $MAX_CONTINUATIONS continuation(s) — giving up"
-            if [[ "$final_state" == "In Progress" || "$final_state" == "Research" ]]; then
-                log WARN "$ticket_id still '$final_state' — reverting to '$REVERT_STATE'"
-                revert_ticket_status "$ticket_id" "$REVERT_STATE"
-            fi
             break
         fi
 
@@ -737,7 +731,7 @@ main() {
     while true; do
         cycle=$((cycle + 1))
         revert_stale_local_claims "research-pi"
-        revert_stale_linear_claims "Research" "Todo" "research-pi"
+        revert_stale_linear_claims "Todo" "Todo" "research-pi"
         log INFO "Poll #${cycle} — $(date '+%Y-%m-%d %H:%M:%S')"
 
         local raw; raw=$(fetch_pending_tickets)
@@ -752,7 +746,7 @@ main() {
         local pending=()
         while IFS= read -r tid; do
             if is_processed "$tid"; then
-                sed -i '' "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null || true
+                sed -i.bak "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null && rm -f "${PROCESSED_FILE}.bak" 2>/dev/null; true
                 log INFO "  $tid re-entered polling state — evicted from cache, will reprocess"
             fi
             pending+=("$tid")

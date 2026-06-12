@@ -138,7 +138,7 @@ git -C "${MAIN_REPO}" push origin --delete "${BRANCH}" 2>/dev/null || true
 ## Phase 6 — Final Report
 
 ```
-✅ /ticket-approve {{ARGUMENTS}} complete
+✅ /ticket-merge {{ARGUMENTS}} complete
   Merged: ${BRANCH} → ${TARGET_BRANCH}
   Worktree: removed | Branch: deleted | Linear: Done
 ```
@@ -148,7 +148,7 @@ git -C "${MAIN_REPO}" push origin --delete "${BRANCH}" 2>/dev/null || true
 ## Status Transitions
 
 ```
-Merging  →  Done  (after merge + push)
+Merge  →  Done  (after merge + push)
 ```
 
 ## Critical Rules

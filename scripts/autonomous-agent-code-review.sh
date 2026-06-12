@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# autonomous-review-agent.sh
+# autonomous-agent-code-review.sh
 #
-# Polls Linear for "Review Pending" tickets, then reviews them one-by-one using
-# /ticket-review. Shows live streaming output with real-time phase banners
+# Polls Linear for "Code Review" tickets, then reviews them one-by-one using
+# /ticket-code-review. Shows live streaming output with real-time phase banners
 # and a structured per-phase summary at the end of each ticket.
 #
-# After /ticket-review completes:
+# After /ticket-code-review completes:
 #   PASS  → ticket moves to "Human Review"; script notifies you to verify
 #   FAIL  → ticket moves to "Changes Required"; full findings logged
 #
 # Usage:
-#   ./scripts/autonomous-review-agent.sh [--poll-interval <seconds>] [--once] [--reset]
+#   ./scripts/autonomous-agent-code-review.sh [--poll-interval <seconds>] [--once] [--reset]
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load stage config
-# shellcheck source=scripts/stages/review.env
-source "$SCRIPT_DIR/stages/review.env"
+# shellcheck source=scripts/stages/code-review.env
+source "$SCRIPT_DIR/stages/code-review.env"
 
 # Set derived paths that depend on SCRIPT_DIR
-LOG_DIR="$SCRIPT_DIR/autonomous-review-logs"
-PROCESSED_FILE="/tmp/autonomous-review-processed.txt"
+LOG_DIR="$SCRIPT_DIR/autonomous-code-review-logs"
+PROCESSED_FILE="/tmp/autonomous-code-review-processed.txt"
 
 # Load shared library
 # shellcheck source=scripts/lib/agent-core.sh
@@ -31,13 +31,13 @@ source "$SCRIPT_DIR/lib/agent-core.sh"
 # ── Stage-specific: stream processor with PASS/FAIL verdict detection ─────────
 
 write_stage_processor() {
-    PROCESSOR="/tmp/review-processor-$$.py"
+    PROCESSOR="/tmp/code-review-processor-$$.py"
     cat > "$PROCESSOR" << 'PYEOF'
 #!/usr/bin/env python3
 """
 Reads Claude stream-json from stdin.
 Prints formatted output with real-time Phase transition banners and surfaces
-the PASS/FAIL verdict from /ticket-review output.
+the PASS/FAIL verdict from /ticket-code-review output.
 Usage: python3 <script> <ticket_id>
 """
 import sys, json, re, os
@@ -321,7 +321,7 @@ PYEOF
             echo ""
             echo -e "${GREEN}${BOLD}  ╔══════════════════════════════════════════════════════╗${RESET}"
             echo -e "${GREEN}${BOLD}  ║  ✅  PASS — ticket moved to Human Review             ║${RESET}"
-            echo -e "${GREEN}${BOLD}  ║  Verify at http://localhost:8105 then /ticket-approve ║${RESET}"
+            echo -e "${GREEN}${BOLD}  ║  Verify at http://localhost:8105 then /ticket-merge   ║${RESET}"
             echo -e "${GREEN}${BOLD}  ╚══════════════════════════════════════════════════════╝${RESET}"
             echo ""
             log PASS "Human verification required for $ticket_id — check Linear + http://localhost:8105"
@@ -361,7 +361,7 @@ stage_post_exit_revert() {
 stage_build_summary_prompt() {
     local ticket_id="$1"
     cat << PROMPT_EOF
-Below is the raw output from reviewing Linear ticket ${ticket_id} via /ticket-review.
+Below is the raw output from reviewing Linear ticket ${ticket_id} via /ticket-code-review.
 
 Write a concise per-phase summary of what actually happened. Use ONLY phases that ran. Format each line as:
 
@@ -416,7 +416,7 @@ data = json.loads(sys.stdin.read())
 nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
 print(nodes[0]['state']['name'] if nodes else '')
 " <<< "$response" 2>/dev/null)
-    [[ "$state_name" == "Review Pending" || "$state_name" == "In Review" ]]
+    [[ "$state_name" == "Code Review" ]]
 }
 
 run_main_loop "$@"

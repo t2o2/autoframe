@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# autonomous-agent-review-pi.sh
+# autonomous-agent-implement-pi.sh
 #
-# Pi-native version of the review agent.
-# Polls Linear for "Review Pending" tickets, then reviews them one-by-one using
-# the /ticket-review pi prompt template.
+# Pi-native version of the implement agent.
+# Polls Linear for "Implementation" and "Changes Required" tickets, then implements
+# them one-by-one using the /ticket-implement pi prompt template.
 #
 # Usage:
-#   ./scripts/autonomous-agent-review-pi.sh [--poll-interval <seconds>] [--once] [--reset]
+#   ./scripts/autonomous-agent-implement-pi.sh [--poll-interval <seconds>] [--once] [--reset]
 #
 # Flags:
 #   --poll-interval <n>   Seconds between polls when idle (default: 60)
@@ -18,8 +18,8 @@ set -uo pipefail
 # ── Config ───────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$SCRIPT_DIR/autonomous-review-pi-logs"
-PROCESSED_FILE="/tmp/autonomous-review-pi-processed.txt"
+LOG_DIR="$SCRIPT_DIR/autonomous-implement-pi-logs"
+PROCESSED_FILE="/tmp/autonomous-implement-pi-processed.txt"
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AUTO_RULES="$SCRIPT_DIR/autonomous-process-rules.md"
@@ -226,7 +226,7 @@ start_heartbeat() {
             sleep "$HEARTBEAT_INTERVAL"
             elapsed=$((elapsed + HEARTBEAT_INTERVAL))
             [[ -n "$hb_file" && -f "$hb_file" ]] && touch "$hb_file"
-            printf "${DIM}[$(date '+%H:%M:%S')] ⏳  Still reviewing ${BOLD}%s${RESET}${DIM}... %dm%ds elapsed${RESET}\n" \
+            printf "${DIM}[$(date '+%H:%M:%S')] ⏳  Still processing ${BOLD}%s${RESET}${DIM}... %dm%ds elapsed${RESET}\n" \
                 "$ticket_id" $((elapsed / 60)) $((elapsed % 60))
         done
     ) &
@@ -253,7 +253,7 @@ linear_gql() {
 }
 
 fetch_pending_tickets() {
-    log INFO "Querying Linear for 'Review Pending' tickets..."
+    log INFO "Querying Linear for 'Implementation' and 'Changes Required' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -262,7 +262,7 @@ fetch_pending_tickets() {
     fi
 
     local response
-    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Review Pending\"]}}}) { nodes { identifier } } }")
+    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Implementation\",\"Changes Required\"]}}}) { nodes { identifier } } }")
 
     if [[ -z "$response" ]]; then
         log WARN "Linear API call failed — will retry next cycle"
@@ -327,7 +327,7 @@ ticket_still_actionable() {
     local ticket_id="$1"
     local state
     state=$(get_ticket_state "$ticket_id") || return 1
-    [[ "$state" == "Review Pending" ]]
+    [[ "$state" == "Implementation" || "$state" == "Changes Required" ]]
 }
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────
@@ -507,7 +507,6 @@ CURRENT_OWNER_PID_FILE=""
 # would broadcast SIGTERM to the agent itself (PID 1 in the container) and tear
 # down the whole poll loop. kill_pipeline_tree refuses to group-kill this group.
 AGENT_PGID="$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')"
-
 # Terminate a pipeline and its descendants WITHOUT ever broadcast-killing the
 # agent. run_ticket launches the pipeline under `set -m`, so it has its OWN
 # process group: group-kill it so claude's children (chromium, MCP servers,
@@ -531,22 +530,22 @@ process_ticket() {
     local ticket_id="$1"
     local exit_code=0
 
-    local lock_dir="/tmp/review-pi-lock-${ticket_id}"
+    local lock_dir="/tmp/implement-pi-lock-${ticket_id}"
     if ! mkdir "$lock_dir" 2>/dev/null; then
         log INFO "  $ticket_id is locked by another local agent — skipping"
         return
     fi
 
-    local HB_FILE="/tmp/review-pi-heartbeat-${ticket_id}.txt"
-    local owner_pid_file="/tmp/review-pi-owner-${ticket_id}.pid"
+    local HB_FILE="/tmp/implement-pi-heartbeat-${ticket_id}.txt"
+    local owner_pid_file="/tmp/implement-pi-owner-${ticket_id}.pid"
     CURRENT_LOCK_DIR="$lock_dir"
     CURRENT_HB_FILE="$HB_FILE"
     CURRENT_OWNER_PID_FILE="$owner_pid_file"
-    local REVERT_STATE="Review Pending"
+    local REVERT_STATE="Implementation"
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local _cur_state
         _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""
-        if [[ "$_cur_state" == "Review Pending" ]]; then
+        if [[ "$_cur_state" == "Implementation" || "$_cur_state" == "Changes Required" ]]; then
             REVERT_STATE="$_cur_state"
         fi
     fi
@@ -557,7 +556,7 @@ process_ticket() {
     local session_dir="$LOG_DIR/sessions/${ticket_id}"
     mkdir -p "$session_dir"
 
-    divider "═" "Reviewing (pi): $ticket_id"
+    divider "═" "Processing (pi): $ticket_id"
     log WORK "Ticket  : $ticket_id"
     log WORK "Session : $session_dir"
     log WORK "Started : $(date '+%Y-%m-%d %H:%M:%S')"
@@ -566,11 +565,10 @@ process_ticket() {
 
     # ── Continuation loop ─────────────────────────────────────────────────────
     local attempt=0
-    local log_file=""
 
     while true; do
         attempt=$((attempt + 1))
-        log_file="$LOG_DIR/${ticket_id}-$(date '+%Y%m%d-%H%M%S').log"
+        local log_file="$LOG_DIR/${ticket_id}-$(date '+%Y%m%d-%H%M%S').log"
         echo "$REVERT_STATE" > "$HB_FILE"
 
         start_heartbeat "$ticket_id" "$HB_FILE"
@@ -586,7 +584,7 @@ process_ticket() {
                     --append-system-prompt "$AUTO_RULES" \
                     --mode json \
                     ${PI_DEFAULT_MODEL:+--model "$PI_DEFAULT_MODEL"} \
-                    "/ticket-review ${ticket_id}" \
+                    "/ticket-implement ${ticket_id}" \
                     2>&1
             ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
         else
@@ -611,7 +609,7 @@ process_ticket() {
         start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID" \
             "$lock_dir" "$owner_pid_file"
         start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" \
-            "Review Pending:In Review" "$owner_pid_file"
+            "Implementation:Changes Required" "$owner_pid_file"
 
         wait "$PIPELINE_PID"
         exit_code=$?
@@ -627,19 +625,14 @@ process_ticket() {
         fi
 
         if [[ -n "$final_state" \
-              && "$final_state" != "In Progress" \
-              && "$final_state" != "Review Pending" \
-              && "$final_state" != "In Review" ]]; then
+              && "$final_state" != "Implementation" \
+              && "$final_state" != "Changes Required" ]]; then
             log OK "✓ $ticket_id advanced to '$final_state' on attempt $attempt"
             break
         fi
 
         if (( attempt > MAX_CONTINUATIONS )); then
             log WARN "$ticket_id: exhausted $MAX_CONTINUATIONS continuation(s) — giving up"
-            if [[ "$final_state" == "In Progress" || "$final_state" == "In Review" ]]; then
-                log WARN "$ticket_id still '$final_state' — reverting to '$REVERT_STATE'"
-                revert_ticket_status "$ticket_id" "$REVERT_STATE"
-            fi
             break
         fi
 
@@ -657,50 +650,8 @@ process_ticket() {
         log WARN "⚠  Exit code ${exit_code} for $ticket_id"
     fi
 
-    # ── Verdict detection from log ────────────────────────────────────────
-    local verdict="unknown"
-    if grep -qi '\bPASS\b' "$log_file" 2>/dev/null && ! grep -qi '\bFAIL\b' "$log_file" 2>/dev/null; then
-        verdict="PASS"
-    elif grep -qi '\bFAIL\b' "$log_file" 2>/dev/null; then
-        verdict="FAIL"
-    fi
-
-    if [[ "$verdict" != "unknown" && -n "${LINEAR_API_KEY:-}" ]]; then
-        local target_state=""
-        case "$verdict" in
-            PASS) target_state="Human Review" ;;
-            FAIL) target_state="Changes Required" ;;
-        esac
-        if [[ -n "$target_state" ]]; then
-            revert_ticket_status "$ticket_id" "$target_state"
-        fi
-    fi
-
-    case "$verdict" in
-        PASS)
-            echo ""
-            echo -e "${GREEN}${BOLD}  ╔══════════════════════════════════════════════════════╗${RESET}"
-            echo -e "${GREEN}${BOLD}  ║  ✅  PASS — ticket moved to Human Review             ║${RESET}"
-            echo -e "${GREEN}${BOLD}  ╚══════════════════════════════════════════════════════╝${RESET}"
-            echo ""
-            log PASS "Review PASSED for $ticket_id — moved to Human Review"
-            ;;
-        FAIL)
-            echo ""
-            echo -e "${RED}${BOLD}  ╔══════════════════════════════════════════════════════╗${RESET}"
-            echo -e "${RED}${BOLD}  ║  ❌  FAIL — ticket moved to Changes Required         ║${RESET}"
-            echo -e "${RED}${BOLD}  ╚══════════════════════════════════════════════════════╝${RESET}"
-            echo ""
-            log FAIL "Review FAILED for $ticket_id — moved to Changes Required"
-            ;;
-        *)
-            log WARN "Verdict unclear for $ticket_id — check log: $log_file"
-            ;;
-    esac
-
-    # ── Conditional cache ─────────────────────────────────────────────────
     if ticket_still_actionable "$ticket_id"; then
-        log WARN "  $ticket_id still in Review Pending — will retry next poll"
+        log WARN "  $ticket_id still in Implementation/Changes Required — will retry next poll"
         rm -rf "$session_dir"
     else
         echo "$ticket_id" >> "$PROCESSED_FILE"
@@ -767,7 +718,7 @@ is_processed()  { grep -qxF "$1" "$PROCESSED_FILE" 2>/dev/null; }
 
 main() {
     divider "═"
-    log INFO "  Autonomous Review Agent (pi)"
+    log INFO "  Autonomous Linear Ticket Agent (pi)"
     log INFO "  Poll interval  : ${POLL_INTERVAL}s"
     log INFO "  Heartbeat      : ${HEARTBEAT_INTERVAL}s"
     log INFO "  Session logs   : $LOG_DIR/"
@@ -779,8 +730,8 @@ main() {
 
     while true; do
         cycle=$((cycle + 1))
-        revert_stale_local_claims "review-pi"
-        revert_stale_linear_claims "In Review" "Review Pending" "review-pi"
+        revert_stale_local_claims "implement-pi"
+        revert_stale_linear_claims "Implementation" "Implementation" "implement-pi"
         log INFO "Poll #${cycle} — $(date '+%Y-%m-%d %H:%M:%S')"
 
         local raw; raw=$(fetch_pending_tickets)
@@ -795,7 +746,7 @@ main() {
         local pending=()
         while IFS= read -r tid; do
             if is_processed "$tid"; then
-                sed -i '' "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null || true
+                sed -i.bak "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null && rm -f "${PROCESSED_FILE}.bak" 2>/dev/null; true
                 log INFO "  $tid re-entered polling state — evicted from cache, will reprocess"
             fi
             pending+=("$tid")

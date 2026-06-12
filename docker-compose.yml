@@ -90,25 +90,25 @@ x-pi-base: &pi-base
 
 services:
   # ── Claude agents ─────────────────────────────────────────────────────────────
-  # Scale with: docker compose up --scale process=3 --profile process
-  process:
+  # Scale with: docker compose up --scale implement=3 --profile implement
+  implement:
     <<: *agent-base
-    command: ["./scripts/autonomous-agent-process.sh"]
-    profiles: ["process", "all"]
+    command: ["./scripts/autonomous-agent-implement.sh"]
+    profiles: ["implement", "all"]
     environment:
       - AGENT_TIER=normal
 
-  review:
+  code-review:
     <<: *agent-base
-    command: ["./scripts/autonomous-agent-review.sh"]
-    profiles: ["review", "all"]
+    command: ["./scripts/autonomous-agent-code-review.sh"]
+    profiles: ["code-review", "all"]
     environment:
       - AGENT_TIER=normal
 
-  approve:
+  merge:
     <<: *agent-base
-    command: ["./scripts/autonomous-agent-approve.sh"]
-    profiles: ["approve", "all"]
+    command: ["./scripts/autonomous-agent-merge.sh"]
+    profiles: ["merge", "all"]
     environment:
       - AGENT_TIER=normal
 
@@ -159,13 +159,13 @@ services:
 
   # ── Pi agents ─────────────────────────────────────────────────────────────────
   # Run all:  docker compose --profile all-pi up --build
-  # Run one:  docker compose --profile process-pi up --build
+  # Run one:  docker compose --profile implement-pi up --build
 
-  process-pi:
+  implement-pi:
     <<: *pi-base
-    container_name: agent-process-pi
-    command: ["./scripts/autonomous-agent-process-pi.sh"]
-    profiles: ["process-pi", "all-pi"]
+    container_name: agent-implement-pi
+    command: ["./scripts/autonomous-agent-implement-pi.sh"]
+    profiles: ["implement-pi", "all-pi"]
     restart: "no"
 
   research-pi:
@@ -180,17 +180,17 @@ services:
     command: ["./scripts/autonomous-agent-plan-pi.sh"]
     profiles: ["plan-pi", "all-pi"]
 
-  review-pi:
+  code-review-pi:
     <<: *pi-base
-    container_name: agent-review-pi
-    command: ["./scripts/autonomous-agent-review-pi.sh"]
-    profiles: ["review-pi", "all-pi"]
+    container_name: agent-code-review-pi
+    command: ["./scripts/autonomous-agent-code-review-pi.sh"]
+    profiles: ["code-review-pi", "all-pi"]
 
-  approve-pi:
+  merge-pi:
     <<: *pi-base
-    container_name: agent-approve-pi
-    command: ["./scripts/autonomous-agent-approve-pi.sh"]
-    profiles: ["approve-pi", "all-pi"]
+    container_name: agent-merge-pi
+    command: ["./scripts/autonomous-agent-merge-pi.sh"]
+    profiles: ["merge-pi", "all-pi"]
 
   retro-pi:
     <<: *pi-base

@@ -4,7 +4,7 @@ runInPlanMode: false
 scope: project
 ---
 
-Retrospective for a Linear ticket: while the branch is still live, inspect the actual diff and commit history, reconstruct the full journey from research through human review, extract process learnings, post a structured retro comment, write the per-ticket artifact, **distil any novel reusable lesson into the curated `thoughts/retrospectives/LESSONS.md`, and commit those docs to the ticket branch** (they ride to develop via the approve merge), then move `Retrospective → Merging` to hand off to the approve stage. All Linear API via `~/.agents/skills/linear/` scripts. No product/source-code changes and no merges — the only writes are the retrospective docs under `thoughts/retrospectives/`.
+Retrospective for a Linear ticket: while the branch is still live, inspect the actual diff and commit history, reconstruct the full journey from research through human review, extract process learnings, post a structured retro comment, write the per-ticket artifact, **distil any novel reusable lesson into the curated `thoughts/retrospectives/LESSONS.md`, and commit those docs to the ticket branch** (they ride to develop via the merge stage), then move `Retrospective → Merge` to hand off to the merge stage. All Linear API via `~/.agents/skills/linear/` scripts. No product/source-code changes and no merges — the only writes are the retrospective docs under `thoughts/retrospectives/`.
 
 ## Request
 
@@ -36,7 +36,7 @@ Parse: title, description, priority, labels. Read `research.md`, `plan.md`, `imp
 
 Claim:
 ```bash
-bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <retrospective_uuid>
+bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <ready_for_retrospective_uuid>
 bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Running retrospective for {{ARGUMENTS}}."
 ```
 
@@ -151,7 +151,7 @@ Retro comment template:
 
 ### 4b — Write the per-ticket artifact (into the worktree)
 
-All retro doc writes go **inside `${WORKTREE}`** so they ride the branch to develop via the approve merge. `${WORKTREE}` was resolved in Phase 2a.
+All retro doc writes go **inside `${WORKTREE}`** so they ride the branch to develop via the merge stage. `${WORKTREE}` was resolved in Phase 2a.
 
 ```bash
 mkdir -p "${WORKTREE}/thoughts/retrospectives"
@@ -200,14 +200,14 @@ else
 fi
 ```
 
-This commit advances the local `${BRANCH}` ref; the approve stage's `merge --ff-only` (or union-resolved `--no-ff`) carries it to develop. **Do not push** — the approve stage owns the remote. **Do not `git add` anything outside `thoughts/retrospectives/`.**
+This commit advances the local `${BRANCH}` ref; the merge stage's `merge --ff-only` (or union-resolved `--no-ff`) carries it to develop. **Do not push** — the merge stage owns the remote. **Do not `git add` anything outside `thoughts/retrospectives/`.**
 
 ---
 
-## Phase 5 — Transition to Merging
+## Phase 5 — Transition to Merge
 
 ```bash
-bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <merging_uuid>
+bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <ready_for_merge_uuid>
 bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Retrospective complete ✅ — findings posted above. Handing off to merge."
 ```
 
@@ -216,7 +216,7 @@ bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Retrospective compl
 ## Status Transitions
 
 ```
-Retrospective  →  Merging   (Phase 5)
+Retrospective  →  Merge   (Phase 5)
 ```
 
 ## Critical Rules
@@ -224,11 +224,11 @@ Retrospective  →  Merging   (Phase 5)
 1. Claim before working — set Retrospective status first
 2. Artifacts + git first for substance; pull the Linear thread on demand for timeline/cycle data only (metadata fetch uses `jq 'del(.comments)'`)
 3. No product/source-code changes and no merges. The **only** writes are the retro docs under `${WORKTREE}/thoughts/retrospectives/` (per-ticket artifact, index, and the curated `LESSONS.md`), committed to the ticket branch. `git diff`/`git log` for inspection is allowed.
-4. `LESSONS.md` is **append-only**: only add a new ticket-tagged block to the Retrospective Log, and only when the lesson is novel and reusable. Never edit existing blocks or the Standing Lessons section — this is what lets the approve stage auto-resolve concurrent appends.
+4. `LESSONS.md` is **append-only**: only add a new ticket-tagged block to the Retrospective Log, and only when the lesson is novel and reusable. Never edit existing blocks or the Standing Lessons section — this is what lets the merge stage auto-resolve concurrent appends.
 5. Base all findings on the actual branch diff + comment history — do not invent or speculate
 6. Post retro comment before writing the artifact/LESSONS files
-7. Commit the docs to the branch (Phase 4d), but **never push** — the approve stage owns the remote
-8. Move to Merging last — only after comment + docs are committed
+7. Commit the docs to the branch (Phase 4d), but **never push** — the merge stage owns the remote
+8. Move to Merge last — only after comment + docs are committed
 9. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
 10. All doc writes go under `${WORKTREE}/thoughts/retrospectives/` — create the dir if absent; never write to the main repo working tree
-11. Never remove the worktree — it is owned by the approve stage
+11. Never remove the worktree — it is owned by the merge stage

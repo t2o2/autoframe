@@ -4,7 +4,7 @@ runInPlanMode: false
 scope: project
 ---
 
-Research a Linear ticket: explore codebase, post structured findings as comment, move `Todo → Research → Research Pending Approval`. All Linear API via `~/.agents/skills/linear/` scripts.
+Research a Linear ticket: explore codebase, post structured findings as comment, move `Todo → Research Pending Approval`. All Linear API via `~/.agents/skills/linear/` scripts.
 
 ## Request
 
@@ -24,7 +24,7 @@ Prior stages hand off through `thoughts/tickets/{{ARGUMENTS}}/`, not the Linear 
 
 ---
 
-## Phase 1 — Fetch & Claim
+## Phase 1 — Fetch
 
 Fetch metadata (no thread) in parallel:
 ```bash
@@ -34,9 +34,8 @@ bash ~/.agents/skills/linear/list-states.sh
 
 Parse: title, description, priority, labels, team ID. If the description references prior discussion, pull human comments once via the on-demand thread command above.
 
-Claim:
+The ticket stays in **Todo** while you work — the agent's filesystem lock prevents double-pickup, so no claim transition is needed. Post a start marker:
 ```bash
-bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <research_uuid>
 bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Picking up research for {{ARGUMENTS}}."
 ```
 
@@ -107,7 +106,7 @@ Scope: [trivial/small/medium/large] | Risks: [...] | Blockers: [...]
 2. Transition:
    ```bash
    bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <research_pending_approval_uuid>
-   bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Research complete. Move to **Research Approved** to trigger planning."
+   bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Research complete. Move to **Planning** to trigger planning."
    ```
 
 3. Write artifact to `thoughts/tickets/{{ARGUMENTS}}/research.md` with: summary, relevant files, patterns, key decisions.
@@ -117,13 +116,12 @@ Scope: [trivial/small/medium/large] | Risks: [...] | Blockers: [...]
 ## Status Transitions
 
 ```
-Todo       →  Research                    (Phase 1)
-Research   →  Research Pending Approval   (Phase 5)
+Todo  →  Research Pending Approval   (Phase 5)
 ```
 
 ## Critical Rules
 
-1. Claim before exploring — set Research status first
+1. No claim transition — the ticket stays in **Todo** while you research; the per-agent filesystem lock prevents double-pickup
 2. Artifacts first; pull the Linear thread only on demand — metadata fetch uses `jq 'del(.comments)'`
 3. Document what IS — never suggest changes; read-only
 4. Concrete file:line references for every finding

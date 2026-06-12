@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# autonomous-approve-agent.sh
+# autonomous-agent-merge.sh
 #
-# Polls Linear for "Merging" tickets, then approves them one-by-one using
-# /ticket-approve. Shows live streaming output with real-time phase banners
+# Polls Linear for "Merge" tickets, then merges them one-by-one using
+# /ticket-merge. Shows live streaming output with real-time phase banners
 # and a structured per-phase summary at the end of each ticket.
 #
 # Usage:
-#   ./scripts/autonomous-approve-agent.sh [--poll-interval <seconds>] [--once] [--reset]
+#   ./scripts/autonomous-agent-merge.sh [--poll-interval <seconds>] [--once] [--reset]
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load stage config
-# shellcheck source=scripts/stages/approve.env
-source "$SCRIPT_DIR/stages/approve.env"
+# shellcheck source=scripts/stages/merge.env
+source "$SCRIPT_DIR/stages/merge.env"
 
 # Set derived paths that depend on SCRIPT_DIR
-LOG_DIR="$SCRIPT_DIR/autonomous-approve-logs"
-PROCESSED_FILE="/tmp/autonomous-approve-processed.txt"
+LOG_DIR="$SCRIPT_DIR/autonomous-merge-logs"
+PROCESSED_FILE="/tmp/autonomous-merge-processed.txt"
 
 # Load shared library
 # shellcheck source=scripts/lib/agent-core.sh
@@ -27,13 +27,13 @@ source "$SCRIPT_DIR/lib/agent-core.sh"
 # ── Stage-specific: stream processor with merge-result detection ──────────────
 
 write_stage_processor() {
-    PROCESSOR="/tmp/approve-processor-$$.py"
+    PROCESSOR="/tmp/merge-processor-$$.py"
     cat > "$PROCESSOR" << 'PYEOF'
 #!/usr/bin/env python3
 """
 Reads Claude stream-json from stdin.
 Prints formatted output with real-time Phase transition banners and surfaces
-the merge result from /ticket-approve output.
+the merge result from /ticket-merge output.
 Usage: python3 <script> <ticket_id>
 """
 import sys, json, re, os
@@ -51,7 +51,7 @@ DM = '\033[2m'      # dim
 YL = '\033[1;33m'   # yellow
 
 PHASE_RE  = re.compile(r'##\s+(Phase\s+\d+[ab]?\s*[—–-]+\s*[^\n]+)', re.IGNORECASE)
-DONE_RE   = re.compile(r'/ticket-approve.*complete|✅.*complete|merged.*→.*develop|Repository is clean', re.IGNORECASE)
+DONE_RE   = re.compile(r'/ticket-merge.*complete|✅.*complete|merged.*→.*develop|Repository is clean', re.IGNORECASE)
 ERROR_RE  = re.compile(r'ERROR:|Cannot auto-merge|Merge failed|conflicts found', re.IGNORECASE)
 
 current_phase = ""
@@ -137,9 +137,9 @@ PYEOF
 
 # ── Stage-specific: cache helpers ─────────────────────────────────────────────
 
-unmark_processed() { sed -i '' "/^${1}$/d" "$PROCESSED_FILE" 2>/dev/null || true; }
+unmark_processed() { sed -i.bak "/^${1}$/d" "$PROCESSED_FILE" 2>/dev/null && rm -f "${PROCESSED_FILE}.bak" 2>/dev/null; true; }
 
-# Remove cached tickets that are no longer in Merging status.
+# Remove cached tickets that are no longer in Merge status.
 prune_cache() {
     local cached
     cached=$(grep -oE "${LINEAR_TEAM_KEY}-[0-9]+" "$PROCESSED_FILE" 2>/dev/null || true)
@@ -148,7 +148,7 @@ prune_cache() {
     while IFS= read -r tid; do
         if ! ticket_still_merging "$tid"; then
             unmark_processed "$tid"
-            log INFO "  Evicted from cache (no longer Merging): $tid"
+            log INFO "  Evicted from cache (no longer Merge): $tid"
         fi
     done <<< "$cached"
 }
@@ -172,7 +172,7 @@ ticket_still_merging() {
         https://api.linear.app/graphql 2>/dev/null)
 
     if [[ $? -ne 0 || -z "$response" ]]; then
-        log WARN "  Linear status check failed for $ticket_id — assuming still Merging"
+        log WARN "  Linear status check failed for $ticket_id — assuming still Merge"
         return 0
     fi
 
@@ -184,7 +184,7 @@ nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
 print(nodes[0]['state']['name'] if nodes else '')
 " <<< "$response" 2>/dev/null)
 
-    [[ "$state_name" == "Merging" ]]
+    [[ "$state_name" == "Merge" ]]
 }
 
 # ── Stage-specific: pre-poll hook (prune cache) ───────────────────────────────
@@ -209,7 +209,7 @@ stage_print_completion_log() {
     local exit_code="$2"
     local ended_at; ended_at=$(date '+%Y-%m-%d %H:%M:%S')
     if [[ $exit_code -eq 0 ]]; then
-        log OK "✓ Approve session ended cleanly for $ticket_id  ($ended_at)"
+        log OK "✓ Merge session ended cleanly for $ticket_id  ($ended_at)"
     else
         log WARN "⚠  Exit code ${exit_code} for $ticket_id"
     fi
@@ -222,7 +222,7 @@ stage_postprocess_ticket() {
 
     # Determine outcome from log
     local outcome="unknown"
-    if python3 - < "$log_file" 2>/dev/null << 'PYEOF' | grep -qiE "ticket-approve.*complete|repository is clean|merged.*→"; then
+    if python3 - < "$log_file" 2>/dev/null << 'PYEOF' | grep -qiE "ticket-merge.*complete|repository is clean|merged.*→"; then
 import sys, json
 for raw in sys.stdin:
     try:
@@ -274,7 +274,10 @@ PYEOF
     esac
 }
 
-# ── Stage-specific: post-exit revert (Merging OR In Progress → Human Review) ──
+# ── Stage-specific: post-exit revert (Merge → Human Review) ─────────
+# Merge is dangerous: if it exits with the ticket still in 'Merge'
+# (i.e. the merge did not complete), kick it back to 'Human Review' rather than
+# auto-retrying a partial merge.
 
 stage_post_exit_revert() {
     local ticket_id="$1"
@@ -282,7 +285,7 @@ stage_post_exit_revert() {
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local final_state
         final_state=$(get_ticket_state "$ticket_id") || final_state=""
-        if [[ "$final_state" == "Merging" || "$final_state" == "In Progress" ]]; then
+        if [[ "$final_state" == "Merge" ]]; then
             log WARN "$ticket_id still '$final_state' after exit — reverting to 'Human Review'"
             revert_ticket_status "$ticket_id" "Human Review"
         fi
@@ -300,7 +303,7 @@ stage_still_actionable() {
 stage_build_summary_prompt() {
     local ticket_id="$1"
     cat << PROMPT_EOF
-Below is the raw output from approving Linear ticket ${ticket_id} via /ticket-approve.
+Below is the raw output from merging Linear ticket ${ticket_id} via /ticket-merge.
 
 Write a concise per-phase summary of what actually happened. Use ONLY phases that ran. Format each line as:
 
@@ -322,7 +325,7 @@ Be factual. No filler.
 PROMPT_EOF
 }
 
-# ── Stage-specific: colorize approve summary (MERGED=green, FAILED=red, else cyan)
+# ── Stage-specific: colorize merge summary (MERGED=green, FAILED=red, else cyan)
 
 _colorize_summary_lines() {
     while IFS= read -r line; do

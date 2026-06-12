@@ -5,8 +5,8 @@
 # one-by-one using /ticket-retro. Shows live streaming output with real-time
 # phase banners and a structured per-phase summary at the end of each ticket.
 #
-# After /ticket-retro completes, the ticket moves to Merging (handing off to
-# the approve stage) and a structured retro comment + artifact file are written.
+# After /ticket-retro completes, the ticket moves to Merge (handing off to
+# the merge stage) and a structured retro comment + artifact file are written.
 #
 # Usage:
 #   ./scripts/autonomous-agent-retro.sh [--poll-interval <seconds>] [--once] [--reset]
@@ -43,7 +43,7 @@ Phases to cover if they ran:
 - Phase 2 — Inspect Branch & Reconstruct Journey: branch diff/commits inspected, Changes Required cycles counted, timeline built
 - Phase 3 — Extract Learnings: number of learnings produced, key themes identified
 - Phase 4 — Post Retro & Write Artifact: comment posted to Linear, artifact written to thoughts/
-- Phase 5 — Transition to Merging: ticket moved to Merging, hand-off comment posted
+- Phase 5 — Transition to Merge: ticket moved to Merge, hand-off comment posted
 
 End with a one-line outcome: MERGING ✅ or INCOMPLETE ❌ with the key reason.
 Be factual. No filler.
@@ -66,7 +66,7 @@ _colorize_summary_lines() {
 
 # ── Stage-specific: post-exit revert ─────────────────────────────────────────
 # Retro is terminal-ish: if it exits with the ticket still in Retrospective,
-# revert back to Retrospective (same state — allows a retry next poll).
+# it simply gets retried next poll (same state — no revert).
 
 stage_post_exit_revert() {
     local ticket_id="$1"

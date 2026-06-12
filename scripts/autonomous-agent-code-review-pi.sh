@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# autonomous-agent-approve-pi.sh
+# autonomous-agent-code-review-pi.sh
 #
-# Pi-native version of the approve agent.
-# Polls Linear for "Merging" tickets, then approves them one-by-one using
-# the /ticket-approve pi prompt template.
+# Pi-native version of the code-review agent.
+# Polls Linear for "Code Review" tickets, then reviews them one-by-one using
+# the /ticket-code-review pi prompt template.
 #
 # Usage:
-#   ./scripts/autonomous-agent-approve-pi.sh [--poll-interval <seconds>] [--once] [--reset]
+#   ./scripts/autonomous-agent-code-review-pi.sh [--poll-interval <seconds>] [--once] [--reset]
 #
 # Flags:
 #   --poll-interval <n>   Seconds between polls when idle (default: 60)
@@ -18,8 +18,8 @@ set -uo pipefail
 # ── Config ───────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="$SCRIPT_DIR/autonomous-approve-pi-logs"
-PROCESSED_FILE="/tmp/autonomous-approve-pi-processed.txt"
+LOG_DIR="$SCRIPT_DIR/autonomous-code-review-pi-logs"
+PROCESSED_FILE="/tmp/autonomous-code-review-pi-processed.txt"
 
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AUTO_RULES="$SCRIPT_DIR/autonomous-process-rules.md"
@@ -226,7 +226,7 @@ start_heartbeat() {
             sleep "$HEARTBEAT_INTERVAL"
             elapsed=$((elapsed + HEARTBEAT_INTERVAL))
             [[ -n "$hb_file" && -f "$hb_file" ]] && touch "$hb_file"
-            printf "${DIM}[$(date '+%H:%M:%S')] ⏳  Still approving ${BOLD}%s${RESET}${DIM}... %dm%ds elapsed${RESET}\n" \
+            printf "${DIM}[$(date '+%H:%M:%S')] ⏳  Still reviewing ${BOLD}%s${RESET}${DIM}... %dm%ds elapsed${RESET}\n" \
                 "$ticket_id" $((elapsed / 60)) $((elapsed % 60))
         done
     ) &
@@ -253,7 +253,7 @@ linear_gql() {
 }
 
 fetch_pending_tickets() {
-    log INFO "Querying Linear for 'Merging' tickets..."
+    log INFO "Querying Linear for 'Code Review' tickets..."
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         log WARN "LINEAR_API_KEY not set — cannot query Linear"
@@ -262,7 +262,7 @@ fetch_pending_tickets() {
     fi
 
     local response
-    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Merging\"]}}}) { nodes { identifier } } }")
+    response=$(linear_gql "{ issues(filter:{team:{key:{eq:\"${LINEAR_TEAM_KEY}\"}},state:{name:{in:[\"Code Review\"]}}}) { nodes { identifier } } }")
 
     if [[ -z "$response" ]]; then
         log WARN "Linear API call failed — will retry next cycle"
@@ -327,7 +327,7 @@ ticket_still_actionable() {
     local ticket_id="$1"
     local state
     state=$(get_ticket_state "$ticket_id") || return 1
-    [[ "$state" == "Merging" ]]
+    [[ "$state" == "Code Review" ]]
 }
 
 # ── Stale-claim helpers ───────────────────────────────────────────────────────
@@ -531,18 +531,25 @@ process_ticket() {
     local ticket_id="$1"
     local exit_code=0
 
-    local lock_dir="/tmp/approve-pi-lock-${ticket_id}"
+    local lock_dir="/tmp/code-review-pi-lock-${ticket_id}"
     if ! mkdir "$lock_dir" 2>/dev/null; then
         log INFO "  $ticket_id is locked by another local agent — skipping"
         return
     fi
 
-    local HB_FILE="/tmp/approve-pi-heartbeat-${ticket_id}.txt"
-    local owner_pid_file="/tmp/approve-pi-owner-${ticket_id}.pid"
+    local HB_FILE="/tmp/code-review-pi-heartbeat-${ticket_id}.txt"
+    local owner_pid_file="/tmp/code-review-pi-owner-${ticket_id}.pid"
     CURRENT_LOCK_DIR="$lock_dir"
     CURRENT_HB_FILE="$HB_FILE"
     CURRENT_OWNER_PID_FILE="$owner_pid_file"
-    local REVERT_STATE="Human Review"
+    local REVERT_STATE="Code Review"
+    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
+        local _cur_state
+        _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""
+        if [[ "$_cur_state" == "Code Review" ]]; then
+            REVERT_STATE="$_cur_state"
+        fi
+    fi
     echo "$REVERT_STATE" > "$HB_FILE"
     trap "rmdir '$lock_dir' 2>/dev/null || true; rm -f '${HB_FILE}' '${owner_pid_file}'; CURRENT_LOCK_DIR=''; CURRENT_HB_FILE=''; CURRENT_OWNER_PID_FILE=''" RETURN
 
@@ -550,7 +557,7 @@ process_ticket() {
     local session_dir="$LOG_DIR/sessions/${ticket_id}"
     mkdir -p "$session_dir"
 
-    divider "═" "Approving (pi): $ticket_id"
+    divider "═" "Reviewing (pi): $ticket_id"
     log WORK "Ticket  : $ticket_id"
     log WORK "Session : $session_dir"
     log WORK "Started : $(date '+%Y-%m-%d %H:%M:%S')"
@@ -559,10 +566,11 @@ process_ticket() {
 
     # ── Continuation loop ─────────────────────────────────────────────────────
     local attempt=0
+    local log_file=""
 
     while true; do
         attempt=$((attempt + 1))
-        local log_file="$LOG_DIR/${ticket_id}-$(date '+%Y%m%d-%H%M%S').log"
+        log_file="$LOG_DIR/${ticket_id}-$(date '+%Y%m%d-%H%M%S').log"
         echo "$REVERT_STATE" > "$HB_FILE"
 
         start_heartbeat "$ticket_id" "$HB_FILE"
@@ -578,7 +586,7 @@ process_ticket() {
                     --append-system-prompt "$AUTO_RULES" \
                     --mode json \
                     ${PI_DEFAULT_MODEL:+--model "$PI_DEFAULT_MODEL"} \
-                    "/ticket-approve ${ticket_id}" \
+                    "/ticket-code-review ${ticket_id}" \
                     2>&1
             ) | tee "$log_file" | python3 "$PROCESSOR" "$ticket_id" "$HB_FILE" &
         else
@@ -603,7 +611,7 @@ process_ticket() {
         start_stale_watchdog "$ticket_id" "$HB_FILE" "$REVERT_STATE" "$PIPELINE_PID" \
             "$lock_dir" "$owner_pid_file"
         start_status_watcher "$ticket_id" "$PIPELINE_PID" "$lock_dir" "$HB_FILE" \
-            "Merging" "$owner_pid_file"
+            "Code Review" "$owner_pid_file"
 
         wait "$PIPELINE_PID"
         exit_code=$?
@@ -613,31 +621,19 @@ process_ticket() {
         stop_stale_watchdog
         stop_heartbeat
 
-        # Clean up any in-progress git operations left behind
-        if [[ -d "${REPO_ROOT}/.git" ]]; then
-            git -C "$REPO_ROOT" rebase --abort 2>/dev/null || true
-            git -C "$REPO_ROOT" merge --abort 2>/dev/null || true
-            git -C "$REPO_ROOT" cherry-pick --abort 2>/dev/null || true
-        fi
-
         local final_state=""
         if [[ -n "${LINEAR_API_KEY:-}" ]]; then
             final_state=$(get_ticket_state "$ticket_id") || final_state=""
         fi
 
         if [[ -n "$final_state" \
-              && "$final_state" != "In Progress" \
-              && "$final_state" != "Merging" ]]; then
+              && "$final_state" != "Code Review" ]]; then
             log OK "✓ $ticket_id advanced to '$final_state' on attempt $attempt"
             break
         fi
 
         if (( attempt > MAX_CONTINUATIONS )); then
             log WARN "$ticket_id: exhausted $MAX_CONTINUATIONS continuation(s) — giving up"
-            if [[ "$final_state" == "Merging" || "$final_state" == "In Progress" ]]; then
-                log WARN "$ticket_id still '$final_state' — reverting to '$REVERT_STATE'"
-                revert_ticket_status "$ticket_id" "$REVERT_STATE"
-            fi
             break
         fi
 
@@ -655,8 +651,50 @@ process_ticket() {
         log WARN "⚠  Exit code ${exit_code} for $ticket_id"
     fi
 
+    # ── Verdict detection from log ────────────────────────────────────────
+    local verdict="unknown"
+    if grep -qi '\bPASS\b' "$log_file" 2>/dev/null && ! grep -qi '\bFAIL\b' "$log_file" 2>/dev/null; then
+        verdict="PASS"
+    elif grep -qi '\bFAIL\b' "$log_file" 2>/dev/null; then
+        verdict="FAIL"
+    fi
+
+    if [[ "$verdict" != "unknown" && -n "${LINEAR_API_KEY:-}" ]]; then
+        local target_state=""
+        case "$verdict" in
+            PASS) target_state="Human Review" ;;
+            FAIL) target_state="Changes Required" ;;
+        esac
+        if [[ -n "$target_state" ]]; then
+            revert_ticket_status "$ticket_id" "$target_state"
+        fi
+    fi
+
+    case "$verdict" in
+        PASS)
+            echo ""
+            echo -e "${GREEN}${BOLD}  ╔══════════════════════════════════════════════════════╗${RESET}"
+            echo -e "${GREEN}${BOLD}  ║  ✅  PASS — ticket moved to Human Review             ║${RESET}"
+            echo -e "${GREEN}${BOLD}  ╚══════════════════════════════════════════════════════╝${RESET}"
+            echo ""
+            log PASS "Review PASSED for $ticket_id — moved to Human Review"
+            ;;
+        FAIL)
+            echo ""
+            echo -e "${RED}${BOLD}  ╔══════════════════════════════════════════════════════╗${RESET}"
+            echo -e "${RED}${BOLD}  ║  ❌  FAIL — ticket moved to Changes Required         ║${RESET}"
+            echo -e "${RED}${BOLD}  ╚══════════════════════════════════════════════════════╝${RESET}"
+            echo ""
+            log FAIL "Review FAILED for $ticket_id — moved to Changes Required"
+            ;;
+        *)
+            log WARN "Verdict unclear for $ticket_id — check log: $log_file"
+            ;;
+    esac
+
+    # ── Conditional cache ─────────────────────────────────────────────────
     if ticket_still_actionable "$ticket_id"; then
-        log WARN "  $ticket_id still 'Merging' — will retry next poll"
+        log WARN "  $ticket_id still in Code Review — will retry next poll"
         rm -rf "$session_dir"
     else
         echo "$ticket_id" >> "$PROCESSED_FILE"
@@ -723,7 +761,7 @@ is_processed()  { grep -qxF "$1" "$PROCESSED_FILE" 2>/dev/null; }
 
 main() {
     divider "═"
-    log INFO "  Autonomous Approve Agent (pi)"
+    log INFO "  Autonomous Code Review Agent (pi)"
     log INFO "  Poll interval  : ${POLL_INTERVAL}s"
     log INFO "  Heartbeat      : ${HEARTBEAT_INTERVAL}s"
     log INFO "  Session logs   : $LOG_DIR/"
@@ -735,8 +773,8 @@ main() {
 
     while true; do
         cycle=$((cycle + 1))
-        revert_stale_local_claims "approve-pi"
-        revert_stale_linear_claims "Merging" "Human Review" "approve-pi"
+        revert_stale_local_claims "code-review-pi"
+        revert_stale_linear_claims "Code Review" "Code Review" "code-review-pi"
         log INFO "Poll #${cycle} — $(date '+%Y-%m-%d %H:%M:%S')"
 
         local raw; raw=$(fetch_pending_tickets)
@@ -751,7 +789,7 @@ main() {
         local pending=()
         while IFS= read -r tid; do
             if is_processed "$tid"; then
-                sed -i '' "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null || true
+                sed -i.bak "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null && rm -f "${PROCESSED_FILE}.bak" 2>/dev/null; true
                 log INFO "  $tid re-entered polling state — evicted from cache, will reprocess"
             fi
             pending+=("$tid")

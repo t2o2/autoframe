@@ -15,36 +15,36 @@ describe('loadWorkflow', () => {
       const config = loadWorkflow(REAL_TOML);
       assert.notEqual(config, null);
       const stageNames = config.stages.map((s) => s.name);
-      assert.deepEqual(stageNames.sort(), ['approve', 'plan', 'process', 'research', 'retro', 'review']);
+      assert.deepEqual(stageNames.sort(), ['code-review', 'implement', 'merge', 'plan', 'research', 'retro']);
     });
 
-    it('process stage poll states match the bash loader output', () => {
+    it('implement stage poll states match the bash loader output', () => {
       const config = loadWorkflow(REAL_TOML);
       assert.notEqual(config, null);
-      const process = config.stages.find((s) => s.name === 'process');
-      assert.notEqual(process, undefined);
-      assert.deepEqual(process.poll, ['Plan Approved', 'Changes Required']);
+      const implement = config.stages.find((s) => s.name === 'implement');
+      assert.notEqual(implement, undefined);
+      assert.deepEqual(implement.poll, ['Implementation', 'Changes Required']);
     });
 
-    it('process stage claim is "In Progress"', () => {
+    it('implement stage claim is "Implementation"', () => {
       const config = loadWorkflow(REAL_TOML);
       assert.notEqual(config, null);
-      const process = config.stages.find((s) => s.name === 'process');
-      assert.equal(process.claim, 'In Progress');
+      const implement = config.stages.find((s) => s.name === 'implement');
+      assert.equal(implement.claim, 'Implementation');
     });
 
-    it('process stage done is "Review Pending"', () => {
+    it('implement stage done is "Code Review"', () => {
       const config = loadWorkflow(REAL_TOML);
       assert.notEqual(config, null);
-      const process = config.stages.find((s) => s.name === 'process');
-      assert.equal(process.done, 'Review Pending');
+      const implement = config.stages.find((s) => s.name === 'implement');
+      assert.equal(implement.done, 'Code Review');
     });
 
-    it('process stage revert is "Plan Approved"', () => {
+    it('implement stage revert is "Implementation"', () => {
       const config = loadWorkflow(REAL_TOML);
       assert.notEqual(config, null);
-      const process = config.stages.find((s) => s.name === 'process');
-      assert.equal(process.revert, 'Plan Approved');
+      const implement = config.stages.find((s) => s.name === 'implement');
+      assert.equal(implement.revert, 'Implementation');
     });
 
     it('stale thresholds are numbers', () => {
@@ -55,18 +55,18 @@ describe('loadWorkflow', () => {
       }
     });
 
-    it('process stale_threshold_s is 1800', () => {
+    it('implement stale_threshold_s is 1800', () => {
       const config = loadWorkflow(REAL_TOML);
       assert.notEqual(config, null);
-      const process = config.stages.find((s) => s.name === 'process');
-      assert.equal(process.stale_threshold_s, 1800);
+      const implement = config.stages.find((s) => s.name === 'implement');
+      assert.equal(implement.stale_threshold_s, 1800);
     });
 
-    it('review stage done can be empty string', () => {
+    it('code-review stage done can be empty string', () => {
       const config = loadWorkflow(REAL_TOML);
       assert.notEqual(config, null);
-      const review = config.stages.find((s) => s.name === 'review');
-      assert.equal(review.done, '');
+      const codeReview = config.stages.find((s) => s.name === 'code-review');
+      assert.equal(codeReview.done, '');
     });
 
     it('dispatch.concurrency is a positive integer', () => {

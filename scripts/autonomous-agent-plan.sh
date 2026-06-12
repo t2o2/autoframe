@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# autonomous-agent-planning.sh
+# autonomous-agent-plan.sh
 #
-# Polls Linear for "Research Approved" tickets, then creates implementation plans for them
+# Polls Linear for "Planning" tickets, then creates implementation plans for them
 # one-by-one using /ticket-plan. Shows live streaming output with real-time
 # phase banners and a structured per-phase summary at the end of each ticket.
 #
 # Usage:
-#   ./scripts/autonomous-agent-planning.sh [--poll-interval <seconds>] [--once] [--reset]
+#   ./scripts/autonomous-agent-plan.sh [--poll-interval <seconds>] [--once] [--reset]
 
 set -uo pipefail
 
@@ -74,22 +74,15 @@ data = json.loads(sys.stdin.read())
 nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
 print(nodes[0]['state']['name'] if nodes else '')
 " <<< "$response" 2>/dev/null)
-    [[ "$state_name" == "Research Approved" ]]
+    [[ "$state_name" == "Planning" ]]
 }
 
 # ── Stage-specific: post-exit revert ─────────────────────────────────────────
+# No claim state: the ticket stays in 'Planning' while the agent
+# works, so a crash needs no revert — it simply gets re-polled. No-op.
 
 stage_post_exit_revert() {
-    local ticket_id="$1"
-    local revert_state="$2"
-    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
-        local final_state
-        final_state=$(get_ticket_state "$ticket_id") || final_state=""
-        if [[ "$final_state" == "Planning" ]]; then
-            log WARN "$ticket_id still in 'Planning' after pipeline exit — reverting to 'Research Approved'"
-            revert_ticket_status "$ticket_id" "Research Approved"
-        fi
-    fi
+    :
 }
 
 run_main_loop "$@"

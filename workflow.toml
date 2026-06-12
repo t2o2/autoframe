@@ -15,7 +15,7 @@ concurrency = 2
 [[stages]]
 name          = "research"
 poll          = ["Todo"]
-claim         = "Research"
+claim         = "Todo"
 done          = "Research Pending Approval"
 revert        = "Todo"
 command       = "/ticket-research"
@@ -23,56 +23,56 @@ pass_state    = ""
 fail_state    = ""
 lock_prefix   = "research"
 stage_verb    = "researching"
-watch_states  = ["Todo", "Research"]
+watch_states  = ["Todo"]
 stale_threshold_s        = 1800
 
 [[stages]]
 name          = "plan"
-poll          = ["Research Approved"]
+poll          = ["Planning"]
 claim         = "Planning"
 done          = "Plan Pending Approval"
-revert        = "Research Approved"
+revert        = "Planning"
 command       = "/ticket-plan"
 pass_state    = ""
 fail_state    = ""
 lock_prefix   = "plan"
 stage_verb    = "planning"
-watch_states  = ["Research Approved", "Planning"]
+watch_states  = ["Planning"]
 stale_threshold_s        = 1800
 
 [[stages]]
-name          = "process"
-poll          = ["Plan Approved", "Changes Required"]
-claim         = "In Progress"
-done          = "Review Pending"
-revert        = "Plan Approved"
-command       = "/ticket-process"
+name          = "implement"
+poll          = ["Implementation", "Changes Required"]
+claim         = "Implementation"
+done          = "Code Review"
+revert        = "Implementation"
+command       = "/ticket-implement"
 pass_state    = ""
 fail_state    = ""
-lock_prefix   = "process"
-stage_verb    = "processing"
-watch_states  = ["Plan Approved", "Changes Required", "In Progress"]
+lock_prefix   = "implement"
+stage_verb    = "implementing"
+watch_states  = ["Implementation", "Changes Required"]
 stale_threshold_s        = 1800
 
 [[stages]]
-name          = "review"
-poll          = ["Review Pending"]
-claim         = "In Review"
+name          = "code-review"
+poll          = ["Code Review"]
+claim         = "Code Review"
 done          = ""
-revert        = "Review Pending"
-command       = "/ticket-review"
+revert        = "Code Review"
+command       = "/ticket-code-review"
 pass_state    = "Human Review"
 fail_state    = "Changes Required"
-lock_prefix   = "review"
+lock_prefix   = "code-review"
 stage_verb    = "reviewing"
-watch_states  = ["Review Pending", "In Review"]
+watch_states  = ["Code Review"]
 stale_threshold_s        = 1800
 
 [[stages]]
 name          = "retro"
 poll          = ["Retrospective"]
 claim         = "Retrospective"
-done          = "Merging"
+done          = "Merge"
 revert        = "Retrospective"
 command       = "/ticket-retro"
 pass_state    = ""
@@ -83,17 +83,17 @@ watch_states  = ["Retrospective"]
 stale_threshold_s        = 1800
 
 [[stages]]
-name          = "approve"
-poll          = ["Merging"]
-claim         = "Merging"
+name          = "merge"
+poll          = ["Merge"]
+claim         = "Merge"
 done          = "Done"
-revert        = "Retrospective"
-command       = "/ticket-approve"
+revert        = "Human Review"
+command       = "/ticket-merge"
 pass_state    = ""
 fail_state    = ""
-lock_prefix   = "approve"
-stage_verb    = "approving"
-watch_states  = ["Merging"]
+lock_prefix   = "merge"
+stage_verb    = "merging"
+watch_states  = ["Merge"]
 stale_threshold_s        = 1800
 
 [preamble]

@@ -33,7 +33,7 @@ Below is the raw output from researching Linear ticket ${ticket_id} via /ticket-
 
 Write a concise per-phase summary of what actually happened. Use ONLY phases that ran. Format each on its own line:
 
-**Phase 1 — Fetch & Claim:** <ticket type, title, status set to Research>
+**Phase 1 — Fetch Ticket:** <ticket type, title>
 **Phase 2 — Identify Research Areas:** <areas identified for investigation>
 **Phase 3 — Parallel Codebase Exploration:** <sub-agents spawned, what each found>
 **Phase 4 — Synthesize Research:** <key findings, files identified, complexity estimate>
@@ -78,18 +78,11 @@ print(nodes[0]['state']['name'] if nodes else '')
 }
 
 # ── Stage-specific: post-exit revert ─────────────────────────────────────────
+# No claim state: the ticket stays in 'Todo' while the agent works, so a crash
+# needs no revert — it simply gets re-polled. No-op.
 
 stage_post_exit_revert() {
-    local ticket_id="$1"
-    local revert_state="$2"
-    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
-        local final_state
-        final_state=$(get_ticket_state "$ticket_id") || final_state=""
-        if [[ "$final_state" == "Research" ]]; then
-            log WARN "$ticket_id still in 'Research' after pipeline exit — reverting to 'Todo'"
-            revert_ticket_status "$ticket_id" "Todo"
-        fi
-    fi
+    :
 }
 
 run_main_loop "$@"

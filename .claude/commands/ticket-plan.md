@@ -45,9 +45,8 @@ cat thoughts/retrospectives/LESSONS.md 2>/dev/null
 
 Extract: title, description, priority, labels, team ID (from metadata) + research findings (from `research.md`, or the on-demand thread pull if the artifact is absent).
 
-Claim:
+The ticket stays in **Planning** while you work — the agent's filesystem lock prevents double-pickup, so no claim transition is needed. Post a start marker:
 ```bash
-bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <planning_uuid>
 bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Starting implementation planning for {{ARGUMENTS}}."
 ```
 
@@ -110,7 +109,7 @@ Unit tests to add, integration tests, regression risks.
 2. Move to Plan Pending Approval:
    ```bash
    bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <plan_pending_approval_uuid>
-   bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Plan posted. Move to **Plan Approved** to trigger coding agent."
+   bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Plan posted. Move to **Implementation** to trigger the implementation agent."
    ```
 
 3. Write artifact to `thoughts/tickets/{{ARGUMENTS}}/plan.md` with: overview, scope boundaries, phase checklist, key files, testing strategy.
@@ -120,13 +119,12 @@ Unit tests to add, integration tests, regression risks.
 ## Status Transitions
 
 ```
-Research Approved  →  Planning              (Phase 1)
-Planning           →  Plan Pending Approval (Phase 5)
+Planning  →  Plan Pending Approval (Phase 5)
 ```
 
 ## Critical Rules
 
-1. Read `research.md` first — artifact is the handoff; pull the Linear thread only if it is missing (metadata fetch uses `jq 'del(.comments)'`)
+1. No claim transition — the ticket stays in **Planning** while you plan; read `research.md` first — artifact is the handoff; pull the Linear thread only if it is missing (metadata fetch uses `jq 'del(.comments)'`)
 2. Phases must be independently testable
 3. Concrete file references — every change names the exact path
 4. No implementation — plan only, zero code changes

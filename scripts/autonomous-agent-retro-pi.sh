@@ -129,7 +129,7 @@ for raw in sys.stdin:
                 if not done_seen and DONE_RE.search(line):
                     done_seen = True
                     emit(f'\n{GN}{"█"*62}{R}')
-                    emit(f'{GN}{BD}  ✅  RETROSPECTIVE COMPLETE — ticket moved to Merging{R}')
+                    emit(f'{GN}{BD}  ✅  RETROSPECTIVE COMPLETE — ticket moved to Merge{R}')
                     emit(f'{GN}{"█"*62}{R}\n')
                 emit(f'{BL}[{ticket_id}]{R} {line}')
 
@@ -695,7 +695,7 @@ main() {
         local pending=()
         while IFS= read -r tid; do
             if is_processed "$tid"; then
-                sed -i '' "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null || true
+                sed -i.bak "/^${tid}$/d" "$PROCESSED_FILE" 2>/dev/null && rm -f "${PROCESSED_FILE}.bak" 2>/dev/null; true
                 log INFO "  $tid re-entered polling state — evicted from cache, will reprocess"
             fi
             pending+=("$tid")

@@ -1,10 +1,10 @@
 ---
-description: Autonomously process a Linear ticket end-to-end in an isolated git worktree (fetch → claim → implement → close)
+description: Autonomously implement a Linear ticket end-to-end in an isolated git worktree (fetch → implement → close)
 runInPlanMode: false
 scope: project
 ---
 
-Process a Linear ticket: fetch → claim → implement → test → proof → push. Each ticket gets its own worktree branch. All Linear API via `~/.agents/skills/linear/` scripts.
+Implement a Linear ticket: fetch → implement → test → proof → push. Each ticket gets its own worktree branch. All Linear API via `~/.agents/skills/linear/` scripts.
 
 ## Environment Capabilities
 
@@ -38,9 +38,7 @@ Prior stages hand off through `thoughts/tickets/{{ARGUMENTS}}/`, not the Linear 
 
 ---
 
-## Phase 0 — Claim & Worktree Setup
-
-**Claim immediately — before any other work.**
+## Phase 0 — Worktree Setup
 
 Fetch metadata (no thread) in parallel:
 ```bash
@@ -56,9 +54,8 @@ BRANCH="${BRANCH_TYPE}/${TICKET}"
 WORKTREE="../worktrees/${BRANCH}"
 ```
 
-Claim:
+The ticket stays in its queue state (**Implementation** or **Changes Required**) while you work — the agent's filesystem lock prevents double-pickup, so no claim transition is needed. Post a start marker:
 ```bash
-bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <in_progress_uuid>
 bash ~/.agents/skills/linear/add-comment.sh "{{ARGUMENTS}}" "Picking up {{ARGUMENTS}} on branch \`${BRANCH}\`."
 ```
 
@@ -156,7 +153,7 @@ Fix failures (up to 2 attempts). Update `handoff.md`: set `last_completed_phase:
 
 ## Phase 6 — Visual Proof (Mandatory)
 
-**No ticket moves to Review Pending without proof uploaded to Linear.**
+**No ticket moves to Code Review without proof uploaded to Linear.**
 
 ```bash
 PROOF_DIR="/tmp/screenshots/{{ARGUMENTS}}"
@@ -207,7 +204,7 @@ git push -u origin "${BRANCH}"
 
 Update status:
 ```bash
-bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <review_pending_uuid>
+bash ~/.agents/skills/linear/update-issue.sh "{{ARGUMENTS}}" --state-id <ready_for_code_review_uuid>
 ```
 
 Write the implementation artifact — this is the **content handoff to review** (so review reads artifacts-first instead of parsing the Linear thread). Write `thoughts/tickets/{{ARGUMENTS}}/implementation.md` with:
@@ -238,7 +235,7 @@ Write the implementation artifact — this is the **content handoff to review** 
 [Checklist — met / unmet]
 ```
 
-Then post the completion comment with: **Branch name** (required — reviewer reads this), files changed, test summary, inline screenshots `![alt]($ASSET_URL)`, API JSON blocks, "Next step: `/ticket-review {{ARGUMENTS}}`". The comment mirrors `implementation.md` for the human-facing audit trail.
+Then post the completion comment with: **Branch name** (required — reviewer reads this), files changed, test summary, inline screenshots `![alt]($ASSET_URL)`, API JSON blocks, "Next step: `/ticket-code-review {{ARGUMENTS}}`". The comment mirrors `implementation.md` for the human-facing audit trail.
 
 Worktree stays — do not remove.
 
@@ -247,14 +244,13 @@ Worktree stays — do not remove.
 ## Status Transitions
 
 ```
-Backlog / Todo  →  In Progress      (Phase 0)
-In Progress     →  Review Pending   (Phase 7)
-In Progress     →  Done             (Phase 7, self-contained)
+Implementation / Changes Required  →  Code Review  (Phase 7)
+Implementation / Changes Required  →  Done                   (Phase 7, self-contained)
 ```
 
 ## Critical Rules
 
-1. Claim first — In Progress before any file operation
+1. No claim transition — the ticket stays in its queue state (Implementation / Changes Required) while you work; the per-agent filesystem lock prevents double-pickup
 2. Read `plan.md` first — artifact is the handoff; pull the Linear thread only on demand (metadata fetch uses `jq 'del(.comments)'`)
 3. All paths use `$WORKTREE` — never touch the main repo
 4. Never work on `develop` directly

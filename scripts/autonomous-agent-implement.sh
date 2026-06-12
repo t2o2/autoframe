@@ -1,40 +1,40 @@
 #!/usr/bin/env bash
-# autonomous-agent-coding.sh
+# autonomous-agent-implement.sh
 #
-# Polls Linear for "Plan Approved" and "Changes Required" tickets, then processes them
-# one-by-one using /ticket-process. Shows live streaming output with real-time
-# phase banners and a structured per-phase summary at the end of each ticket.
+# Polls Linear for "Implementation" and "Changes Required" tickets, then
+# implements them one-by-one using /ticket-implement. Shows live streaming output with
+# real-time phase banners and a structured per-phase summary at the end of each ticket.
 #
 # Usage:
-#   ./scripts/autonomous-agent-coding.sh [--poll-interval <seconds>] [--once] [--reset]
+#   ./scripts/autonomous-agent-implement.sh [--poll-interval <seconds>] [--once] [--reset]
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load stage config
-# shellcheck source=scripts/stages/process.env
-source "$SCRIPT_DIR/stages/process.env"
+# shellcheck source=scripts/stages/implement.env
+source "$SCRIPT_DIR/stages/implement.env"
 
 # Set derived paths that depend on SCRIPT_DIR
-LOG_DIR="$SCRIPT_DIR/autonomous-process-logs"
-PROCESSED_FILE="/tmp/autonomous-process-processed.txt"
+LOG_DIR="$SCRIPT_DIR/autonomous-implement-logs"
+PROCESSED_FILE="/tmp/autonomous-implement-processed.txt"
 
 # Load shared library
 # shellcheck source=scripts/lib/agent-core.sh
 source "$SCRIPT_DIR/lib/agent-core.sh"
 
 # ── Stage-specific: dynamic REVERT_STATE ─────────────────────────────────────
-# Read the actual current state before claiming so we can revert correctly on
-# crash (ticket may be "Plan Approved" or "Changes Required").
+# Read the actual current state so we record the right queue state (ticket may
+# be "Implementation" or "Changes Required").
 
 stage_compute_revert_state() {
     local ticket_id="$1"
-    local fallback="Plan Approved"
+    local fallback="Implementation"
     if [[ -n "${LINEAR_API_KEY:-}" ]]; then
         local _cur_state
         _cur_state=$(get_ticket_state "$ticket_id") || _cur_state=""
-        if [[ "$_cur_state" == "Plan Approved" || "$_cur_state" == "Changes Required" ]]; then
+        if [[ "$_cur_state" == "Implementation" || "$_cur_state" == "Changes Required" ]]; then
             echo "$_cur_state"
             return
         fi
@@ -47,13 +47,13 @@ stage_compute_revert_state() {
 stage_build_summary_prompt() {
     local ticket_id="$1"
     cat << PROMPT_EOF
-Below is the raw output from processing Linear ticket ${ticket_id} through /ticket-process.
+Below is the raw output from implementing Linear ticket ${ticket_id} through /ticket-implement.
 
 Write a concise per-phase summary of what actually happened. Use ONLY phases that ran. Format each on its own line:
 
 **Phase 0 — Worktree Setup:** <1 sentence>
 **Phase 1 — Fetch & Analyze:** <ticket type, title, any dependencies or blockers found>
-**Phase 2 — Claim:** <assigned + plan comment posted>
+**Phase 2 — Plan Comment:** <assigned + plan comment posted>
 **Phase 3 — Explore & Plan:** <root cause or design approach, key files identified>
 **Phase 4 — Implement:** <what changed and why — be specific about files/functions>
 **Phase 5a — Tests:** <suites run and pass/fail result>
@@ -83,22 +83,16 @@ data = json.loads(sys.stdin.read())
 nodes = data.get('data', {}).get('issues', {}).get('nodes', [])
 print(nodes[0]['state']['name'] if nodes else '')
 " <<< "$response" 2>/dev/null)
-    [[ "$state_name" == "Plan Approved" || "$state_name" == "Changes Required" ]]
+    [[ "$state_name" == "Implementation" || "$state_name" == "Changes Required" ]]
 }
 
 # ── Stage-specific: post-exit revert ─────────────────────────────────────────
+# No claim state: the ticket stays in its queue state ('Implementation'
+# or 'Changes Required') while the agent works, so a crash needs no revert — it
+# simply gets re-polled. No-op.
 
 stage_post_exit_revert() {
-    local ticket_id="$1"
-    local revert_state="$2"
-    if [[ -n "${LINEAR_API_KEY:-}" ]]; then
-        local final_state
-        final_state=$(get_ticket_state "$ticket_id") || final_state=""
-        if [[ "$final_state" == "In Progress" ]]; then
-            log WARN "$ticket_id still 'In Progress' after pipeline exit — reverting to '$revert_state'"
-            revert_ticket_status "$ticket_id" "$revert_state"
-        fi
-    fi
+    :
 }
 
 run_main_loop "$@"
