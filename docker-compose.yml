@@ -57,6 +57,8 @@ x-pi-base: &pi-base
   platform: linux/${DOCKER_PLATFORM:-arm64}
   working_dir: /workspace/repo
   privileged: true
+  depends_on:
+    - redis
   mem_limit: ${AGENT_MEM_LIMIT:-8g}
   memswap_limit: ${AGENT_MEMSWAP_LIMIT:-10g}
   env_file:
@@ -80,6 +82,7 @@ x-pi-base: &pi-base
     - HOME=/home/agent
     - CARGO_TARGET_DIR=/cache/cargo_target
     - RUST_LOG=${RUST_LOG:-info}
+    - REDIS_URL=redis://redis:6379   # ask-human.sh Slack button relay
   restart: unless-stopped
   extra_hosts:
     - "host.docker.internal:host-gateway"
@@ -131,9 +134,10 @@ services:
       - AGENT_TIER=normal
 
   # Slack ticket intake bot: polls a Slack channel, refines requests into Linear
-  # tickets via Claude, and creates them when the user approves.
-  # Requires: SLACK_BOT_TOKEN, SLACK_TICKET_CHANNEL (or SLACK_CHANNEL),
-  #           ANTHROPIC_API_KEY, LINEAR_API_KEY, LINEAR_TEAM_KEY.
+  # tickets via Claude, and creates them when the user approves via Block Kit
+  # buttons (Socket Mode delivers the click — no public Request URL needed).
+  # Requires: SLACK_BOT_TOKEN, SLACK_APP_TOKEN (xapp-…), SLACK_TICKET_CHANNEL
+  #           (or SLACK_CHANNEL), ANTHROPIC_API_KEY, LINEAR_API_KEY, LINEAR_TEAM_KEY.
   slack-listen:
     <<: *agent-base
     container_name: agent-slack-listen

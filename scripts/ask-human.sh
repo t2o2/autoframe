@@ -4,13 +4,16 @@
 # Asks a human a question and waits up to 1 hour for the answer, printing the
 # chosen option text to stdout so the agent can read it. Channel-agnostic:
 #
-#   • Slack    (preferred) — set SLACK_BOT_TOKEN (+ SLACK_CHANNEL). Posts the
-#     question to the channel; the human replies IN THE THREAD with the option
-#     number or free text. Zero infra: needs only a bot token with chat:write
-#     and channels:history (or groups:history for a private channel), and the
-#     bot invited to the channel. No interactivity Request URL / Socket Mode.
+#   • Slack    (preferred) — set SLACK_BOT_TOKEN (+ SLACK_CHANNEL). When OPTIONS
+#     are given the human taps a Block Kit BUTTON (no typing). Button clicks are
+#     delivered over Socket Mode, so this needs:
+#       - the slack-listen bot running (the single Socket Mode consumer that
+#         relays the click — it needs SLACK_APP_TOKEN), and
+#       - REDIS_URL set, shared with slack-listen, for handing back the answer.
+#     If either is missing (exit 75), or the question is free-text (no options),
+#     it falls back to the legacy thread-reply flow (reply with a number / text).
 #   • Telegram (fallback)  — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID. Uses
-#     tappable inline-keyboard buttons.
+#     tappable inline-keyboard buttons (self-contained, no extra infra).
 #
 # Either way it also @-mentions the ticket owner on Linear so the right human is
 # pinged there too (best-effort; never blocks the ask).
@@ -146,7 +149,32 @@ slack_api() {  # $1 = method, $2 = json body → raw response on stdout
         -d "$2" 2>/dev/null || echo '{"ok":false}'
 }
 
+# Buttons path (when options are given): delegate to the Node helper, which
+# posts Block Kit buttons and waits for the answer via Redis (the slack-listen
+# bot is the single Socket Mode consumer that relays the click). Falls back to
+# the legacy thread-reply flow when buttons can't be used (exit 75) or for
+# free-text questions with no options.
 run_slack() {
+    notify_ticket_owner
+
+    if [[ ${#OPTIONS[@]} -gt 0 ]]; then
+        local out code
+        out=$(ASK_TIMEOUT="$TIMEOUT" node "$REPO_ROOT/scripts/ask-human-slack.mjs" \
+            "$TICKET_ID" "$QUESTION" "${OPTIONS[@]}")
+        code=$?
+        if [[ $code -ne 75 && $code -ne 127 ]]; then
+            printf '%s\n' "$out"
+            exit $code
+        fi
+        echo "ask-human: Slack buttons unavailable — falling back to thread replies" >&2
+    fi
+
+    run_slack_legacy
+}
+
+# Legacy Slack flow: post the question and poll the thread for a typed reply
+# (option number or free text). Used for free-text asks and as the button fallback.
+run_slack_legacy() {
     local text resp ts channel_id bot_user_id
     text=$(python3 -c "
 import sys
@@ -173,8 +201,6 @@ print('\n'.join(lines))
     ts=$(jq -r '.ts' <<< "$resp")
     channel_id=$(jq -r '.channel' <<< "$resp")   # resolved id (works even if SLACK_CHANNEL was a name)
     bot_user_id=$(jq -r '.user // empty' <<< "$(slack_api auth.test '{}')")
-
-    notify_ticket_owner
 
     # Poll the thread for the first human (non-bot) reply.
     local deadline now chosen reply

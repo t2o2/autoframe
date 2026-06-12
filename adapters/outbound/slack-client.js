@@ -93,6 +93,30 @@ export class SlackClient {
     });
   }
 
+  /** Post a Block Kit message (buttons etc.). `text` is the accessibility fallback. */
+  async postBlocks(channelId, text, blocks) {
+    return this.call('chat.postMessage', { channel: channelId, text, blocks, unfurl_links: false });
+  }
+
+  /**
+   * Post a Block Kit message (e.g. an approval card with buttons) in a thread.
+   * `text` is the notification/accessibility fallback shown where blocks can't render.
+   */
+  async postBlocksInThread(channelId, threadTs, text, blocks) {
+    return this.call('chat.postMessage', {
+      channel: channelId,
+      thread_ts: threadTs,
+      text,
+      blocks,
+      unfurl_links: false,
+    });
+  }
+
+  /** Replace an existing message's blocks — used to retire buttons after a click. */
+  async updateMessage(channelId, ts, text, blocks) {
+    return this.call('chat.update', { channel: channelId, ts, text, blocks });
+  }
+
   /** Add an emoji reaction to a message. Requires reactions:write scope. */
   async addReaction(channelId, ts, emoji = 'eyes') {
     return this.call('reactions.add', { channel: channelId, timestamp: ts, name: emoji });

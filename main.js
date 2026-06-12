@@ -193,6 +193,7 @@ async function createClaims() {
  */
 async function slackListenCommand() {
   const slackToken = process.env.SLACK_BOT_TOKEN;
+  const slackAppToken = process.env.SLACK_APP_TOKEN;       // xapp-… app-level token for Socket Mode
   const ticketChannel = process.env.SLACK_TICKET_CHANNEL || process.env.SLACK_CHANNEL;
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;   // may be absent when using OAuth
   const linearApiKey = process.env.LINEAR_API_KEY;
@@ -200,6 +201,7 @@ async function slackListenCommand() {
 
   const missing = [];
   if (!slackToken) missing.push('SLACK_BOT_TOKEN');
+  if (!slackAppToken) missing.push('SLACK_APP_TOKEN (xapp-… for Socket Mode button clicks)');
   if (!ticketChannel) missing.push('SLACK_TICKET_CHANNEL (or SLACK_CHANNEL)');
   // Accept either a direct API key or CLAUDE_CODE_OAUTH_TOKEN (handled by the claude CLI)
   if (!anthropicApiKey && !process.env.CLAUDE_CODE_OAUTH_TOKEN) missing.push('ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN)');
@@ -216,7 +218,10 @@ async function slackListenCommand() {
   process.on('SIGINT', () => { console.log('\n[slack-listener] Stopped.'); process.exit(0); });
   process.on('SIGTERM', () => { console.log('[slack-listener] Stopped.'); process.exit(0); });
 
-  await startSlackListener({ slackToken, ticketChannel, anthropicApiKey, linearApiKey, linearTeamKey });
+  await startSlackListener({
+    slackToken, slackAppToken, ticketChannel, anthropicApiKey, linearApiKey, linearTeamKey,
+    redisUrl: process.env.REDIS_URL,
+  });
 }
 
 /**

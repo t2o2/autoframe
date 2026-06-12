@@ -7,8 +7,12 @@
 #
 # This is a long-running process — Docker restart policy keeps it alive.
 #
+# The user approves the drafted ticket with Approve/Cancel buttons (Block Kit),
+# delivered over Socket Mode — no public interactivity Request URL needed.
+#
 # Required env (loaded from .env via docker-compose env_file):
-#   SLACK_BOT_TOKEN          Slack bot token
+#   SLACK_BOT_TOKEN          Slack bot token (xoxb-…)
+#   SLACK_APP_TOKEN          Slack app-level token (xapp-…) — Socket Mode button clicks
 #   SLACK_TICKET_CHANNEL     Channel to watch (falls back to SLACK_CHANNEL)
 #   ANTHROPIC_API_KEY        Claude API key
 #   LINEAR_API_KEY           Linear personal API key
