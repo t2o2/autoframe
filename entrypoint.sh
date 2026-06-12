@@ -218,7 +218,7 @@ tier      = os.environ.get('AGENT_TIER', 'normal')  # 'normal' | 'advanced'
 
 ANTHROPIC_MODELS = {
     'normal':   'claude-sonnet-4-6',
-    'advanced': 'claude-opus-4-7',
+    'advanced': 'claude-opus-4-8',
 }
 OR_MODELS = {
     'normal':   os.environ.get('OR_MODEL_NORMAL', ''),

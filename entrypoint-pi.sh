@@ -183,7 +183,7 @@ export PI_CODING_AGENT_DIR="${PI_AGENT_DIR}"
 # ── 4. Model selection via AGENT_TIER env var (mirrors claude entrypoint behaviour)
 TIER="${AGENT_TIER:-normal}"
 case "$TIER" in
-    advanced) PI_MODEL="claude-opus-4-7" ;;
+    advanced) PI_MODEL="claude-opus-4-8" ;;
     *)        PI_MODEL="claude-sonnet-4-6" ;;
 esac
 export PI_DEFAULT_MODEL="$PI_MODEL"

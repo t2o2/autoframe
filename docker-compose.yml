@@ -103,7 +103,7 @@ services:
     command: ["./scripts/autonomous-agent-code-review.sh"]
     profiles: ["code-review", "all"]
     environment:
-      - AGENT_TIER=normal
+      - AGENT_TIER=advanced
 
   merge:
     <<: *agent-base
@@ -124,7 +124,7 @@ services:
     command: ["./scripts/autonomous-agent-plan.sh"]
     profiles: ["plan", "all"]
     environment:
-      - AGENT_TIER=normal
+      - AGENT_TIER=advanced
 
   retro:
     <<: *agent-base
