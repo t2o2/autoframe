@@ -11,6 +11,6 @@
     "zod": "^3.24.0"
   },
   "scripts": {
-    "test": "node --test core/*.test.js adapters/outbound/*.test.js"
+    "test": "node --test core/*.test.js adapters/outbound/*.test.js adapters/inbound/*.test.js"
   }
 }

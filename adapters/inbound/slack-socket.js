@@ -35,20 +35,56 @@ export async function handleFrame(frame, { ack, onBlockAction }) {
   return frame.envelope_id ? 'ack-only' : 'ignored';
 }
 
+/**
+ * Exponential backoff with a hard cap. Pure (no clock/timer) so it can be unit
+ * tested. `attempt` is 1-based: attempt 1 → baseMs, 2 → 2×, 3 → 4×, … capped at
+ * maxMs.
+ */
+export function backoffDelay(attempt, { baseMs = 1_000, maxMs = 30_000 } = {}) {
+  const n = Math.max(1, Math.floor(attempt));
+  const exp = baseMs * 2 ** (n - 1);
+  return Math.min(exp, maxMs);
+}
+
 export class SlackSocket {
-  /** @param {string} appToken xapp-… app-level token */
-  constructor(appToken, { WebSocketImpl = globalThis.WebSocket } = {}) {
+  /**
+   * @param {string} appToken xapp-… app-level token
+   * @param {{
+   *   WebSocketImpl?: typeof globalThis.WebSocket,
+   *   fetchImpl?: typeof globalThis.fetch,
+   *   setTimeoutImpl?: typeof globalThis.setTimeout,
+   *   clearTimeoutImpl?: typeof globalThis.clearTimeout,
+   *   reconnect?: { baseMs?: number, maxMs?: number },
+   * }} [opts]
+   */
+  constructor(appToken, {
+    WebSocketImpl = globalThis.WebSocket,
+    fetchImpl = globalThis.fetch,
+    setTimeoutImpl = globalThis.setTimeout,
+    clearTimeoutImpl = globalThis.clearTimeout,
+    reconnect = {},
+  } = {}) {
     if (!appToken) throw new Error('SlackSocket requires an app-level token (xapp-…)');
     this.appToken = appToken;
     this.WebSocketImpl = WebSocketImpl;
+    this.fetchImpl = fetchImpl;
+    this.setTimeoutImpl = setTimeoutImpl;
+    this.clearTimeoutImpl = clearTimeoutImpl;
     /** @type {(payload: object) => Promise<void> | void} */
     this.onBlockAction = async () => {};
     this.ws = null;
     this.stopped = false;
+    // Resilient-reconnect state. A failed reconnect MUST schedule another attempt
+    // (the old one-shot setTimeout gave up on the first failure, permanently
+    // killing Socket Mode after a transient network blip).
+    this.reconnectBaseMs = reconnect.baseMs ?? 1_000;
+    this.reconnectMaxMs = reconnect.maxMs ?? 30_000;
+    this._reconnectAttempts = 0;
+    this._reconnectTimer = null;
   }
 
   async _openConnectionUrl() {
-    const res = await fetch('https://slack.com/api/apps.connections.open', {
+    const res = await this.fetchImpl('https://slack.com/api/apps.connections.open', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.appToken}`,
@@ -87,9 +123,8 @@ export class SlackSocket {
 
     ws.addEventListener('close', () => {
       if (this.stopped) return;
-      console.error('[slack-socket] disconnected — reconnecting in 1s');
-      setTimeout(() => this._connect().catch((err) =>
-        console.error('[slack-socket] reconnect failed:', err.message)), 1_000);
+      console.error('[slack-socket] disconnected — scheduling reconnect');
+      this._scheduleReconnect();
     });
 
     ws.addEventListener('error', (event) => {
@@ -100,7 +135,35 @@ export class SlackSocket {
       ws.addEventListener('open', resolve, { once: true });
       ws.addEventListener('error', reject, { once: true });
     });
+    // Connected cleanly — reset backoff so the next blip starts from baseMs.
+    this._reconnectAttempts = 0;
     console.log('[slack-socket] connected (Socket Mode)');
+  }
+
+  /**
+   * Schedule a reconnect attempt with exponential backoff, and — crucially —
+   * keep rescheduling if the attempt itself fails. Idempotent: a single timer
+   * is in flight at a time, so overlapping `close`/`error`/rejection signals
+   * don't stack up duplicate loops.
+   */
+  _scheduleReconnect() {
+    if (this.stopped) return;
+    if (this._reconnectTimer) return; // an attempt is already pending
+    this._reconnectAttempts += 1;
+    const delay = backoffDelay(this._reconnectAttempts, {
+      baseMs: this.reconnectBaseMs,
+      maxMs: this.reconnectMaxMs,
+    });
+    this._reconnectTimer = this.setTimeoutImpl(() => {
+      this._reconnectTimer = null;
+      this._connect().catch((err) => {
+        const cause = err?.cause?.code ?? err?.cause?.message;
+        console.error(
+          `[slack-socket] reconnect failed: ${err.message}${cause ? ` (${cause})` : ''}`,
+        );
+        this._scheduleReconnect(); // keep trying until stop()
+      });
+    }, delay);
   }
 
   _send(obj) {
@@ -109,6 +172,10 @@ export class SlackSocket {
 
   stop() {
     this.stopped = true;
+    if (this._reconnectTimer) {
+      this.clearTimeoutImpl(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
     try { this.ws?.close(); } catch { /* ignore */ }
   }
 }
