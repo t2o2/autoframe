@@ -240,7 +240,9 @@ log INFO "spec-loop agent started (poll=${POLL_INTERVAL_S}s, base=$BASE_BRANCH, 
 while true; do
     cd "$REPO_DIR" 2>/dev/null || { log ERROR "repo not found at $REPO_DIR"; exit 1; }
 
-    if git fetch origin "$BASE_BRANCH" >/dev/null 2>&1; then
+    # Capture stderr so a failed fetch reports *why* (auth, network, DNS…), not
+    # just that it failed. Trim to one line to keep the log readable.
+    if fetch_err="$(git fetch origin "$BASE_BRANCH" 2>&1 >/dev/null)"; then
         NEW_SHA="$(git rev-parse "origin/$BASE_BRANCH")"
         LAST_SHA="$(cat "$STATE_FILE" 2>/dev/null || true)"
 
@@ -249,7 +251,9 @@ while true; do
             run_audit "$NEW_SHA" "$LAST_SHA" || log WARN "audit failed — will retry next poll"
         fi
     else
-        log WARN "git fetch failed — retrying next poll"
+        fetch_err="${fetch_err//$'\n'/; }"
+        fetch_err="${fetch_err## }"; fetch_err="${fetch_err%% }"
+        log WARN "git fetch failed — ${fetch_err:-unknown error} — retrying next poll"
     fi
 
     [[ "$ONCE" == "1" ]] && exit 0
