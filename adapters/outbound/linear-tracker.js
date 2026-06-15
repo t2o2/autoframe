@@ -94,6 +94,21 @@ function buildUpdateMutation(issueId, stateId) {
   return JSON.stringify({ query });
 }
 
+/**
+ * Build a commentCreate mutation body to post a comment on an issue.
+ * @param {string} issueId   UUID
+ * @param {string} body      markdown comment body
+ * @returns {string}
+ */
+export function buildCommentMutation(issueId, body) {
+  const query = `mutation {
+    commentCreate(input: { issueId: ${JSON.stringify(issueId)}, body: ${JSON.stringify(body)} }) {
+      success
+    }
+  }`;
+  return JSON.stringify({ query });
+}
+
 const LINEAR_API = 'https://api.linear.app/graphql';
 
 /**
@@ -174,6 +189,12 @@ export function createLinearTracker({ apiKey, teamKey }) {
         resolveStateId(toState),
       ]);
       await gql(buildUpdateMutation(issueId, stateId));
+    },
+
+    // UNVERIFIED: needs live run with LINEAR_API_KEY
+    async comment(ticketId, body) {
+      const issueId = await resolveIssueUuid(ticketId);
+      await gql(buildCommentMutation(issueId, body));
     },
 
     // UNVERIFIED: needs live run with LINEAR_API_KEY

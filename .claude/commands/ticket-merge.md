@@ -27,6 +27,43 @@ This stage is purely mechanical (merge + cleanup) and needs **no** comment threa
 ```bash
 MAIN_REPO=$(git rev-parse --show-toplevel)
 TICKET="{{ARGUMENTS}}"
+TEAM_KEY="${TICKET%%-*}"
+
+# Resolve the Human Review state UUID up front — the failure helper needs it.
+# list-states.sh prints a `column -t` table (type<sp>name<sp>uuid); split on 2+
+# spaces so the state name's internal single space is preserved.
+HUMAN_REVIEW_UUID=$(bash ~/.agents/skills/linear/list-states.sh "${TEAM_KEY}" \
+  | awk -F '  +' '$2=="Human Review"{print $3}')
+```
+
+### Failure helper — `fail_to_human` (use on EVERY failure)
+
+A merge can fail for many reasons (no branch, dirty tree, real conflict, rejected
+push). **Never bare `exit 1`** — a silent exit lets the ticket get reverted to
+Human Review with no explanation, leaving the human to reverse-engineer what
+broke. Always route failures through this helper so the *reason* lands on the
+ticket as a comment and the move to Human Review is deterministic:
+
+```bash
+# fail_to_human <reason-markdown>
+fail_to_human() {
+  local reason="$1"
+  bash ~/.agents/skills/linear/add-comment.sh "${TICKET}" "❌ **Merge failed — needs human attention.**
+
+${reason}
+
+Branch \`${BRANCH:-<unresolved>}\` was **not** merged; the worktree is left intact for inspection. Moving the ticket to **Human Review**."
+  if [ -n "${HUMAN_REVIEW_UUID}" ]; then
+    bash ~/.agents/skills/linear/update-issue.sh "${TICKET}" --state-id "${HUMAN_REVIEW_UUID}"
+  else
+    echo "WARN: could not resolve Human Review state UUID — comment posted, state left unchanged"
+  fi
+  echo "FAIL: ${reason}"
+  exit 1
+}
+```
+
+```bash
 if git show-ref --verify --quiet "refs/heads/feat/${TICKET}"; then
   BRANCH="feat/${TICKET}"
 elif git show-ref --verify --quiet "refs/heads/fix/${TICKET}"; then
@@ -34,7 +71,7 @@ elif git show-ref --verify --quiet "refs/heads/fix/${TICKET}"; then
 else
   BRANCH=$(git branch -r | grep -E "(feat|fix)/${TICKET}$" | head -1 | sed 's|origin/||' | tr -d ' ')
 fi
-[ -z "${BRANCH}" ] && echo "No branch found for ${TICKET}" && exit 1
+[ -z "${BRANCH}" ] && fail_to_human "No \`feat/${TICKET}\` or \`fix/${TICKET}\` branch was found locally or on origin — there is nothing to merge. The branch may have already been merged and cleaned up, or never pushed."
 WORKTREE="../worktrees/${BRANCH}"
 ```
 
@@ -55,13 +92,25 @@ No parent → `TARGET_BRANCH="${GIT_BASE_BRANCH:-develop}"`.
 
 ## Phase 1 — Pre-Merge
 
+Every step here can fail (network, auth, divergence, dirty tree) — route each
+failure through `fail_to_human` so the cause is reported, not swallowed:
+
 ```bash
-git fetch origin "${BRANCH}" "${TARGET_BRANCH}"
-git -C "${MAIN_REPO}" checkout "${TARGET_BRANCH}"
-git -C "${MAIN_REPO}" pull origin "${TARGET_BRANCH}"
-git -C "${MAIN_REPO}" status --short   # must be clean
+git fetch origin "${BRANCH}" "${TARGET_BRANCH}" \
+  || fail_to_human "\`git fetch origin ${BRANCH} ${TARGET_BRANCH}\` failed — could not retrieve refs from origin (network or auth issue)."
+git -C "${MAIN_REPO}" checkout "${TARGET_BRANCH}" \
+  || fail_to_human "Could not check out target branch \`${TARGET_BRANCH}\` in the main repo."
+git -C "${MAIN_REPO}" pull origin "${TARGET_BRANCH}" \
+  || fail_to_human "\`git pull origin ${TARGET_BRANCH}\` failed — local and remote \`${TARGET_BRANCH}\` may have diverged, or the pull hit a conflict."
+
+STATUS=$(git -C "${MAIN_REPO}" status --short)
+if [ -n "${STATUS}" ]; then
+  fail_to_human "Target branch \`${TARGET_BRANCH}\` has a dirty working tree — refusing to merge on top of uncommitted changes:
+\`\`\`
+${STATUS}
+\`\`\`"
+fi
 ```
-If not clean → stop, report, exit.
 
 ---
 
@@ -94,10 +143,25 @@ if [ "${CONFLICTS}" = "${LESSONS_PATH}" ]; then
   rm -rf "${TMP}"
   git -C "${MAIN_REPO}" commit --no-edit   # completes the in-progress merge
 elif [ -n "${CONFLICTS}" ]; then
-  echo "Merge conflict in non-LESSONS files — aborting for human review:"
-  echo "${CONFLICTS}"
   git -C "${MAIN_REPO}" merge --abort
-  exit 1
+  fail_to_human "Merge produced conflicts in files other than \`LESSONS.md\`, which are never auto-resolved. Conflicted paths:
+\`\`\`
+${CONFLICTS}
+\`\`\`
+Resolve the conflicts by hand (rebase \`${BRANCH}\` onto \`${TARGET_BRANCH}\` or merge manually), then re-run /ticket-merge."
+fi
+```
+
+### Verify the merge actually completed
+
+`--ff-only`/`--no-ff` can also fail for reasons that leave no conflicted files
+(e.g. the merge was refused outright). Confirm the merge landed before pushing
+— otherwise Phase 3 would push an unmerged target:
+
+```bash
+if ! git -C "${MAIN_REPO}" merge-base --is-ancestor "${BRANCH}" HEAD; then
+  git -C "${MAIN_REPO}" merge --abort 2>/dev/null || true
+  fail_to_human "The merge of \`${BRANCH}\` into \`${TARGET_BRANCH}\` did not complete (commit \`${BRANCH}\` is not an ancestor of HEAD after the merge attempt). No changes were pushed."
 fi
 ```
 
@@ -106,7 +170,8 @@ fi
 ## Phase 3 — Push
 
 ```bash
-git -C "${MAIN_REPO}" push origin "${TARGET_BRANCH}"
+git -C "${MAIN_REPO}" push origin "${TARGET_BRANCH}" \
+  || fail_to_human "The merge succeeded locally but \`git push origin ${TARGET_BRANCH}\` was rejected — the remote may have moved ahead, or branch protection blocked it. The local merge commit exists but is NOT on origin; re-run after pulling, or push manually."
 ```
 
 ---
@@ -148,7 +213,8 @@ git -C "${MAIN_REPO}" push origin --delete "${BRANCH}" 2>/dev/null || true
 ## Status Transitions
 
 ```
-Merge  →  Done  (after merge + push)
+Merge  →  Done           (after merge + push succeed)
+Merge  →  Human Review   (any failure — always with a comment explaining why)
 ```
 
 ## Critical Rules
@@ -163,3 +229,4 @@ Merge  →  Done  (after merge + push)
 8. Move to Done last — only after push succeeds
 9. Never force-push protected branches
 10. All Linear API via `~/.agents/skills/linear/` scripts, not MCP tools
+11. **Never fail silently.** Every failure path must go through `fail_to_human` (Phase 0) so the *reason* is posted as a Linear comment and the ticket is deterministically moved to Human Review — never a bare `exit 1`, which leaves the human in the dark

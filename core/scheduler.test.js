@@ -77,6 +77,113 @@ describe('createScheduler', () => {
       assert.equal(await staleClaims.isOwned('ENG-99', 'process'), false);
     });
 
+    it('posts an explanatory comment when it reverts a stale ticket', async () => {
+      const THRESHOLD_S = 1800;
+      const now = 2000000000000;
+      const startedAt = now - (THRESHOLD_S + 1) * 1000;
+
+      const staleClaims = createClaimStore({ clock: { now: () => startedAt } });
+      await staleClaims.acquire('ENG-99', 'worker-7', 'merge');
+
+      const comments = [];
+      const tracker = {
+        async fetchCandidates() { return []; },
+        async claimTicket() {},
+        async revertTicket() {},
+        async comment(ticketId, body) { comments.push({ ticketId, body }); },
+        async getState() { return ''; },
+      };
+
+      const stage = makeStage({
+        name: 'merge',
+        stage_verb: 'merging',
+        revert: 'Human Review',
+        stale_threshold_s: THRESHOLD_S,
+      });
+
+      const scheduler = createScheduler({
+        tracker,
+        agent: { async run() {} },
+        claims: staleClaims,
+        clock: { now: () => now },
+        stages: [stage],
+        config: { dispatch: { concurrency: 2 } },
+      });
+
+      await scheduler.tick();
+
+      assert.equal(comments.length, 1);
+      assert.equal(comments[0].ticketId, 'ENG-99');
+      assert.match(comments[0].body, /merging/);
+      assert.match(comments[0].body, /Human Review/);
+      assert.match(comments[0].body, /worker-7/);
+    });
+
+    it('still reverts a stale ticket when the tracker has no comment method', async () => {
+      const THRESHOLD_S = 1800;
+      const now = 2000000000000;
+      const startedAt = now - (THRESHOLD_S + 1) * 1000;
+
+      const staleClaims = createClaimStore({ clock: { now: () => startedAt } });
+      await staleClaims.acquire('ENG-99', 'engine', 'process');
+
+      const revertedTickets = [];
+      const tracker = {
+        async fetchCandidates() { return []; },
+        async claimTicket() {},
+        async revertTicket(ticketId) { revertedTickets.push(ticketId); },
+        async getState() { return ''; },
+        // no `comment` method — optional-chaining call must safely no-op
+      };
+
+      const scheduler = createScheduler({
+        tracker,
+        agent: { async run() {} },
+        claims: staleClaims,
+        clock: { now: () => now },
+        stages: [makeStage({ stale_threshold_s: THRESHOLD_S })],
+        config: { dispatch: { concurrency: 2 } },
+      });
+
+      await scheduler.tick();
+
+      assert.deepEqual(revertedTickets, ['ENG-99']);
+      assert.equal(await staleClaims.isOwned('ENG-99', 'process'), false);
+    });
+
+    it('reverts even when posting the explanatory comment throws', async () => {
+      const THRESHOLD_S = 1800;
+      const now = 2000000000000;
+      const startedAt = now - (THRESHOLD_S + 1) * 1000;
+
+      const staleClaims = createClaimStore({ clock: { now: () => startedAt } });
+      await staleClaims.acquire('ENG-99', 'engine', 'process');
+
+      const revertedTickets = [];
+      const tracker = {
+        async fetchCandidates() { return []; },
+        async claimTicket() {},
+        async revertTicket(ticketId) { revertedTickets.push(ticketId); },
+        async comment() { throw new Error('Linear API HTTP 500'); },
+        async getState() { return ''; },
+      };
+
+      const scheduler = createScheduler({
+        tracker,
+        agent: { async run() {} },
+        claims: staleClaims,
+        clock: { now: () => now },
+        stages: [makeStage({ stale_threshold_s: THRESHOLD_S })],
+        config: { dispatch: { concurrency: 2 } },
+      });
+
+      await scheduler.tick();
+
+      // Comment failure must not block the revert or the release.
+      assert.deepEqual(revertedTickets, ['ENG-99']);
+      assert.equal(await staleClaims.isOwned('ENG-99', 'process'), false);
+    });
+
     it('does not revert a running ticket within the stale threshold', async () => {
       const THRESHOLD_S = 1800;
       const now = 2000000000000;

@@ -18,7 +18,11 @@
  *     claim TTL, so a live agent running past the original TTL never loses its
  *     claim to expiry → the dispatch pass never re-acquires it (no double-exec).
  *     Stale claims from ANY container are reverted — a dead container can't revert
- *     its own, so a live one does it, releasing with the holder's owner.
+ *     its own, so a live one does it, releasing with the holder's owner. The revert
+ *     is never silent: a best-effort explanatory comment is posted to the ticket
+ *     (via tracker.comment, when available) so a timed-out/crashed agent's revert
+ *     carries a reason instead of leaving the human to guess. A comment failure
+ *     never blocks the revert.
  *  2. For each enabled stage, fetchCandidates and sortTickets.
  *  3. For each sorted candidate: skip if already claimed; acquire claim and fire
  *     agent.run() asynchronously (fire-and-forget with error handling).
@@ -100,6 +104,22 @@ export function createScheduler({ tracker, agent, claims, clock, stages, config,
               // the (possibly dead, possibly remote) container we observed, so a
               // freshly re-acquired claim is not clobbered.
               await claims.release(record.ticketId, record.owner, stage.name);
+              // Explain the revert so it is never silent. A stale agent may have
+              // crashed/timed out before it could report, leaving the ticket in
+              // `revert` with no context for the human. Best-effort: a comment
+              // failure (or a tracker without `comment`) must never block the
+              // revert itself.
+              try {
+                const minutes = Math.max(1, Math.round(stage.stale_threshold_s / 60));
+                await tracker.comment?.(
+                  record.ticketId,
+                  `⏱\uFE0F The **${stage.stage_verb ?? stage.name}** stage stopped responding — no heartbeat for over ${minutes} min (container \`${record.owner}\` likely crashed or timed out). Automatically reverted to **${stage.revert}**. No work was lost; re-trigger the stage or handle it manually, and check the engine logs for \`${record.owner}\`.`,
+                );
+              } catch (commentErr) {
+                console.error(
+                  `[scheduler] Reverted stale ticket ${record.ticketId} but failed to post explanation: ${commentErr.message}`,
+                );
+              }
             } catch (err) {
               console.error(
                 `[scheduler] Failed to revert stale ticket ${record.ticketId}: ${err.message}`,

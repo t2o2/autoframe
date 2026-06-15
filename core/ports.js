@@ -30,6 +30,7 @@
  * @property {(ticketId: string, toState: string) => Promise<void>} claimTicket
  * @property {(ticketId: string, toState: string) => Promise<void>} revertTicket
  * @property {(ticketId: string) => Promise<string>} getState
+ * @property {(ticketId: string, body: string) => Promise<void>} [comment]   post a (markdown) comment on the ticket; optional + best-effort, used to explain automated state changes so they are never silent
  */
 
 /**

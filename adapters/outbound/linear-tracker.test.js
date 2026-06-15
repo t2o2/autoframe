@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapLinearResponse } from './linear-tracker.js';
+import { mapLinearResponse, buildCommentMutation } from './linear-tracker.js';
 
 describe('mapLinearResponse', () => {
   it('maps a well-formed response with multiple tickets', () => {
@@ -143,3 +143,24 @@ describe('mapLinearResponse', () => {
   });
 });
 
+
+describe('buildCommentMutation', () => {
+  it('embeds issueId and body and is valid JSON with a commentCreate mutation', () => {
+    const body = buildCommentMutation('uuid-123', 'Merge failed: conflict in src/a.rs');
+    const parsed = JSON.parse(body);
+    assert.match(parsed.query, /commentCreate/);
+    assert.match(parsed.query, /uuid-123/);
+    assert.match(parsed.query, /Merge failed: conflict in src\/a\.rs/);
+  });
+
+  it('escapes quotes, newlines and backticks in the body (JSON.stringify)', () => {
+    const tricky = 'line1\n"quoted" and `code` and \\backslash';
+    const body = buildCommentMutation('uuid-9', tricky);
+    // Must parse as JSON without throwing despite the special characters.
+    const parsed = JSON.parse(body);
+    // The body is re-encoded inside the GraphQL string literal; round-tripping
+    // the embedded JSON-string back out must recover the original text.
+    const embedded = JSON.parse(parsed.query.match(/body: (".*?")\s*\}\s*\)/s)[1]);
+    assert.equal(embedded, tricky);
+  });
+});
