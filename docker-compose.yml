@@ -210,6 +210,38 @@ services:
     command: ["./scripts/autonomous-agent-spec-loop-pi.sh"]
     profiles: ["spec-loop-pi", "all-pi"]
 
+  # ── Fleet health monitor ──────────────────────────────────────────────────────
+  # Watches the agent fleet from OUTSIDE (a wedged container can't watch itself)
+  # and alerts a human via scripts/notify-human.sh on: full disk, crashed/looping
+  # containers, hung poll loops, and livelocks (claiming nothing despite work —
+  # the failure mode where a full disk makes every ticket look "locked").
+  # Talks to the HOST docker daemon via the mounted socket so it can see all the
+  # sibling agent containers. Alert credentials (SLACK_*/TELEGRAM_*) come from
+  # .env via env_file. Tune via MONITOR_* knobs (see .env).
+  monitor:
+    image: docker:cli
+    container_name: agent-monitor
+    profiles: ["monitor", "all", "all-pi"]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - CHECK_INTERVAL=${MONITOR_CHECK_INTERVAL:-120}
+      - DISK_WARN_PCT=${MONITOR_DISK_WARN_PCT:-85}
+      - LOG_WINDOW_MIN=${MONITOR_LOG_WINDOW_MIN:-15}
+      - ALERT_REMIND_SECS=${MONITOR_ALERT_REMIND_SECS:-21600}
+    volumes:
+      # Read-only host docker socket: see/inspect sibling containers, never mutate.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./scripts:/opt/monitor/scripts:ro
+      - monitor_state:/var/lib/agent-monitor
+    entrypoint: ["/bin/sh", "-c"]
+    # docker:cli is Alpine: add bash + curl + jq for notify-human.sh and coreutils
+    # for a GNU `date` that parses docker's RFC3339 --timestamps.
+    command:
+      - apk add --no-cache bash curl jq coreutils >/dev/null 2>&1 && exec bash /opt/monitor/scripts/monitor-agents.sh
+
   # ── Shared infrastructure ─────────────────────────────────────────────────────
   # No profile — starts whenever any agent profile is active (via depends_on).
   # Persistence disabled: claims are ephemeral; a restart clears stale locks
@@ -225,3 +257,5 @@ volumes:
     name: autoframe_cargo_target
   sccache:
     name: autoframe_sccache
+  monitor_state:
+    name: autoframe_monitor_state

@@ -794,6 +794,24 @@ stage_build_summary_prompt() {
     echo "Write a concise per-phase summary of what happened processing ticket ${ticket_id}. Be factual. No filler."
 }
 
+# ── Claim-failure alerting ───────────────────────────────────────────────────
+# A non-EEXIST mkdir failure (disk full / FS error) repeats every poll. Throttle
+# the human alert to once per CLAIM_FAIL_ALERT_INTERVAL seconds (default 1h) using
+# an in-memory timestamp — deliberately NOT a marker file, since the failure mode
+# is usually a full disk where we cannot write one.
+CLAIM_FAIL_ALERT_INTERVAL="${CLAIM_FAIL_ALERT_INTERVAL:-3600}"
+_LAST_CLAIM_FAIL_ALERT=0
+
+notify_claim_failure() {
+    local ticket_id="$1" disk="$2"
+    local now; now=$(date +%s)
+    (( now - _LAST_CLAIM_FAIL_ALERT < CLAIM_FAIL_ALERT_INTERVAL )) && return
+    _LAST_CLAIM_FAIL_ALERT=$now
+    local notifier="${REPO_ROOT:-.}/scripts/notify-human.sh"
+    [[ -x "$notifier" ]] || return
+    "$notifier" "🛑 ${STAGE_NAME:-agent} agent on $(hostname): cannot claim tickets — mkdir failed with no lock present (likely DISK FULL). Stuck on ${ticket_id}. Disk: ${disk}. The stage is livelocked and processing nothing until space is freed." >/dev/null 2>&1 || true
+}
+
 # ── Per-ticket driver ─────────────────────────────────────────────────────────
 
 run_ticket() {
@@ -803,7 +821,19 @@ run_ticket() {
 
     local lock_dir="/tmp/${LOCK_PREFIX}-lock-${ticket_id}"
     if ! mkdir "$lock_dir" 2>/dev/null; then
-        log INFO "  $ticket_id is locked by another local agent — skipping"
+        # mkdir can fail for two very different reasons. EEXIST means another
+        # local agent genuinely holds the claim — expected, skip quietly. Any
+        # OTHER failure (most often ENOSPC: the container's filesystem is full)
+        # is an infrastructure fault that must NOT be silently swallowed as a
+        # lock, or the stage livelocks forever misreporting "locked". Make it
+        # loud in the log and fire a throttled human alert.
+        if [[ -d "$lock_dir" ]]; then
+            log INFO "  $ticket_id is locked by another local agent — skipping"
+        else
+            local _disk; _disk=$(df -Ph / 2>/dev/null | awk 'NR==2{print $4" free, "$5" used"}')
+            log ERROR "  CLAIM FAILED for $ticket_id — mkdir '$lock_dir' failed but no lock dir exists (likely disk full / FS error). Disk: ${_disk:-unknown}"
+            notify_claim_failure "$ticket_id" "${_disk:-unknown}"
+        fi
         return
     fi
 
